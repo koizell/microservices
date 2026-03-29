@@ -48,7 +48,7 @@ function serviceBase(serviceKey) {
   }
 
   if (!useSameOriginProxy) {
-    return "http://" + hostName + ":" + servicePorts[serviceKey];
+    return "http://" + hostName + ":" + servicePorts[serviceKey] + servicePaths[serviceKey];
   }
 
   return servicePaths[serviceKey];
@@ -78,6 +78,20 @@ function serviceFetch(serviceKey, path, init) {
 
   requestInit.headers = headers;
   return fetch(serviceUrl(serviceKey, path), requestInit);
+}
+
+async function readResponsePayload(response) {
+  const rawText = await response.text();
+
+  if (!rawText) {
+    return { data: {}, rawText: "" };
+  }
+
+  try {
+    return { data: JSON.parse(rawText), rawText: rawText };
+  } catch {
+    return { data: {}, rawText: rawText };
+  }
 }
 
 function clearSessionStorage() {
@@ -506,16 +520,24 @@ async function doLogin() {
       method: "POST",
       body: { email: email, password: password },
     });
-    const data = await response.json().catch(function () {
-      return {};
-    });
+    const payload = await readResponsePayload(response);
+    const data = payload.data;
+    const rawText = payload.rawText.trim();
 
     if (!response.ok) {
       throw new Error(data.message || "Credenciales incorrectas");
     }
 
     if (!data.accessToken || typeof data.accessToken !== "string") {
-      throw new Error(data.message || "La respuesta del login no incluyo un token valido");
+      let detail = "";
+
+      if (!rawText) {
+        detail = " El servicio devolvio una respuesta vacia.";
+      } else if (rawText.startsWith("<")) {
+        detail = " El servicio devolvio HTML en lugar de JSON.";
+      }
+
+      throw new Error((data.message || "La respuesta del login no incluyo un token valido") + detail);
     }
 
     sessionToken = data.accessToken;
