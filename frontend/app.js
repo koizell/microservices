@@ -110,8 +110,27 @@ function getTokenExpiry(rawToken) {
   return Number(payload && payload.exp ? payload.exp * 1000 : 0);
 }
 
+function normalizeSessionUser(candidateUser, rawToken, fallbackEmail) {
+  const payload = decodeJwtPayload(rawToken || "");
+  const source = candidateUser && typeof candidateUser === "object" ? candidateUser : {};
+  const resolvedEmail = String(source.email || (payload && payload.email) || fallbackEmail || "").trim().toLowerCase();
+
+  if (!resolvedEmail) {
+    return null;
+  }
+
+  return {
+    id: String(source.id || (payload && payload.sub) || "").trim(),
+    name: String(source.name || (payload && payload.name) || "").trim(),
+    email: resolvedEmail,
+    accountType: normalizeRole(source.accountType || (payload && payload.accountType) || "guest"),
+    isEmailVerified: Boolean(source.isEmailVerified),
+    emailVerifiedAt: source.emailVerifiedAt || null,
+  };
+}
+
 function saveSessionState(lastPanelName) {
-  if (!sessionToken || !currentUser) {
+  if (!sessionToken || !currentUser || !currentUser.email) {
     return;
   }
 
@@ -389,6 +408,11 @@ function switchPanel(name, tabButton) {
 }
 
 function showSession(preferredPanel) {
+  currentUser = normalizeSessionUser(currentUser, sessionToken, "");
+  if (!currentUser) {
+    throw new Error("No se pudo cargar el perfil de la sesion");
+  }
+
   const card = document.getElementById("card");
   const cardInner = document.getElementById("cardInner");
   const shell = document.getElementById("vSession");
@@ -403,7 +427,7 @@ function showSession(preferredPanel) {
   shell.style.display = "flex";
   document.getElementById("sessGreet").textContent = "Hola, " + displayName + "!";
   document.getElementById("sessEmail").textContent = currentUser.email;
-  document.getElementById("sessId").textContent = currentUser.id;
+  document.getElementById("sessId").textContent = currentUser.id || "No disponible";
   roleElement.textContent = roleLabel(role);
   roleElement.className = "role-pill " + role;
   applyRoleInterface(role);
@@ -433,10 +457,15 @@ function restoreSessionState() {
   }
 
   try {
-    currentUser = JSON.parse(storedUser);
+    currentUser = normalizeSessionUser(JSON.parse(storedUser), storedToken, "");
     sessionToken = storedToken;
     refreshToken = storedRefreshToken || "";
   } catch {
+    clearSessionStorage();
+    return false;
+  }
+
+  if (!currentUser) {
     clearSessionStorage();
     return false;
   }
@@ -485,9 +514,17 @@ async function doLogin() {
       throw new Error(data.message || "Credenciales incorrectas");
     }
 
+    if (!data.accessToken || typeof data.accessToken !== "string") {
+      throw new Error(data.message || "La respuesta del login no incluyo un token valido");
+    }
+
     sessionToken = data.accessToken;
     refreshToken = data.refreshToken || "";
-    currentUser = data.user;
+    currentUser = normalizeSessionUser(data.user, sessionToken, email);
+    if (!currentUser) {
+      throw new Error("La respuesta del login no incluyo un usuario valido");
+    }
+
     saveSessionState("inicio");
     showSession("inicio");
     startSessionWatcher();
