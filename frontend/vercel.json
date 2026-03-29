@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)",
-      "destination": "/api/proxy/:service"
+      "destination": "/api/proxy?service=:service"
     },
     {
       "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)/:path*",
-      "destination": "/api/proxy/:service/:path*"
+      "destination": "/api/proxy?service=:service&path=:path*"
     }
   ]
 }
