@@ -69,6 +69,7 @@ Nota de build en Render:
 - JWT_SECRET: se genera una vez y se comparte entre servicios.
 - DB_SYNCHRONIZE: queda en false para evitar cambios destructivos de esquema en cloud.
 - APP_BASE_URL: debe apuntar a Vercel para que confirmacion de correo y reset funcionen desde el dominio publico.
+- NODE_OPTIONS: usa --dns-result-order=ipv4first para evitar que Node intente resolver Supabase por IPv6 primero en Render.
 
 ## Notas operativas
 
