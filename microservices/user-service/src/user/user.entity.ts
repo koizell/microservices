@@ -20,27 +20,27 @@ export class User {
   @Column()
   password: string;
 
-  @Column({ type: 'varchar', default: AccountType.STANDARD })
+  @Column({ name: 'account_type', type: 'varchar', default: AccountType.STANDARD })
   accountType: string;
 
-  @Column({ default: false })
+  @Column({ name: 'is_email_verified', default: false })
   isEmailVerified: boolean;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ name: 'email_verification_token', type: 'varchar', nullable: true })
   emailVerificationToken: string | null;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'email_verification_expires_at', type: 'timestamp', nullable: true })
   emailVerificationExpiresAt: Date | null;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'email_verified_at', type: 'timestamp', nullable: true })
   emailVerifiedAt: Date | null;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ name: 'password_reset_token', type: 'varchar', nullable: true })
   passwordResetToken: string | null;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'password_reset_expires_at', type: 'timestamp', nullable: true })
   passwordResetExpiresAt: Date | null;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'password_reset_requested_at', type: 'timestamp', nullable: true })
   passwordResetRequestedAt: Date | null;
 }
