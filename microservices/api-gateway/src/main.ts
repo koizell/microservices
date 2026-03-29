@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { randomUUID } from 'crypto';
 import { AppModule } from './app.module';
-import prometheus from 'prom-client';
+import * as prometheus from 'prom-client';
 
 const register = new prometheus.Registry();
 
