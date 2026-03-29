@@ -19,7 +19,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/user-service
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /users
     envVars:
@@ -40,7 +40,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/event-service
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /events
     envVars:
@@ -54,7 +54,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/ticketing-service
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /tickets
     envVars:
@@ -83,7 +83,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/notification-service
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /notifications
     envVars:
@@ -114,7 +114,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/credential-service
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /credentials/health
     envVars:
@@ -128,7 +128,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/analytics-service
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /analytics/health
     envVars:
@@ -142,7 +142,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/agenda-service
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /agenda/health
     envVars:
@@ -156,7 +156,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/mobile-api-service
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /mobile/health
     envVars:
@@ -188,7 +188,7 @@ services:
     plan: free
     region: oregon
     rootDir: microservices/api-gateway
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
     healthCheckPath: /gateway/health
     envVars:

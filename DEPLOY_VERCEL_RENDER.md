@@ -38,6 +38,9 @@
    - eventhive-credential-service
    - eventhive-analytics-service
 
+Nota de build en Render:
+- Como el blueprint fija NODE_ENV=production, los servicios NestJS deben compilar con devDependencies incluidas. Por eso render.yaml usa buildCommand con npm install --include=dev antes de npm run build.
+
 ## Paso 2. Configurar Vercel
 
 1. Crea el proyecto apuntando a la carpeta frontend como Root Directory.
