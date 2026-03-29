@@ -1,9 +1,30 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { lookup } from 'dns';
+import { connect as connectSocket, isIP, Socket } from 'net';
 import * as nodemailer from 'nodemailer';
 import { Transporter } from 'nodemailer';
+import SMTPTransport = require('nodemailer/lib/smtp-transport');
 
 function normalizeSecret(value: string | undefined) {
   return String(value ?? '').trim().replace(/\s+/g, '');
+}
+
+function normalizeTimeout(value: number | string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function resolveSmtpIpFamily(host: string) {
+  if (!host || isIP(host)) {
+    return 0;
+  }
+
+  const configuredFamily = String(process.env.SMTP_IP_FAMILY ?? '4').trim().toLowerCase();
+  if (configuredFamily === 'auto' || configuredFamily === '0') {
+    return 0;
+  }
+
+  return configuredFamily === '6' ? 6 : 4;
 }
 
 @Injectable()
@@ -237,16 +258,23 @@ export class EmailService {
     const smtpHost = String(process.env.SMTP_HOST ?? '').trim();
     const smtpUser = String(process.env.SMTP_USER ?? '').trim();
     const smtpPass = normalizeSecret(process.env.SMTP_PASS);
+    const smtpPort = Number(process.env.SMTP_PORT ?? 587);
+    const secure = process.env.SMTP_SECURE === 'true';
+    const connectionTimeout = normalizeTimeout(process.env.SMTP_CONNECTION_TIMEOUT_MS, 10000);
+    const greetingTimeout = normalizeTimeout(process.env.SMTP_GREETING_TIMEOUT_MS, 10000);
+    const socketTimeout = normalizeTimeout(process.env.SMTP_SOCKET_TIMEOUT_MS, 15000);
 
     if (smtpHost && smtpUser && smtpPass) {
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
-        port: Number(process.env.SMTP_PORT ?? 587),
-        secure: process.env.SMTP_SECURE === 'true',
-        requireTLS: process.env.SMTP_SECURE !== 'true',
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000,
+        port: smtpPort,
+        secure,
+        requireTLS: !secure,
+        connectionTimeout,
+        greetingTimeout,
+        socketTimeout,
+        tls: isIP(smtpHost) ? undefined : { servername: smtpHost },
+        getSocket: this.createSmtpSocketFactory(),
         auth: {
           user: smtpUser,
           pass: smtpPass,
@@ -260,9 +288,9 @@ export class EmailService {
     if (gmailUser && gmailAppPassword) {
       this.transporter = nodemailer.createTransport({
         service: 'gmail',
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000,
+        connectionTimeout,
+        greetingTimeout,
+        socketTimeout,
         auth: {
           user: gmailUser,
           pass: gmailAppPassword,
@@ -272,6 +300,76 @@ export class EmailService {
     }
 
     return null;
+  }
+
+  private createSmtpSocketFactory(): SMTPTransport.Options['getSocket'] {
+    return (options, callback) => {
+      const host = String(options.host ?? '').trim();
+      const preferredFamily = resolveSmtpIpFamily(host);
+
+      if (!host || preferredFamily === 0) {
+        callback(null, false);
+        return;
+      }
+
+      lookup(host, { family: preferredFamily }, (lookupError, address) => {
+        if (lookupError || !address) {
+          this.logger.warn(
+            `No se pudo resolver ${host} por IPv${preferredFamily}. Nodemailer usara la resolucion por defecto.`,
+          );
+          callback(null, false);
+          return;
+        }
+
+        const port = Number(options.port ?? 587);
+        const timeoutMs = normalizeTimeout(options.connectionTimeout, 10000);
+        const socket = connectSocket({
+          host: address,
+          port,
+          family: preferredFamily,
+          localAddress: options.localAddress,
+        });
+
+        let finished = false;
+        const cleanup = () => {
+          clearTimeout(timer);
+          socket.removeListener('connect', handleConnect);
+          socket.removeListener('error', handleError);
+        };
+        const finish = (error: Error | null, socketOptions?: { connection: Socket }) => {
+          if (finished) {
+            return;
+          }
+
+          finished = true;
+          cleanup();
+
+          if (error) {
+            if (!socket.destroyed) {
+              socket.destroy();
+            }
+            callback(error, false);
+            return;
+          }
+
+          callback(null, socketOptions ?? false);
+        };
+        const handleConnect = () => {
+          this.logger.log(`SMTP conectado por IPv${preferredFamily} a ${host} (${address}:${port})`);
+          finish(null, { connection: socket });
+        };
+        const handleError = (error: Error) => {
+          finish(error);
+        };
+        const timer = setTimeout(() => {
+          finish(new Error(`Timeout conectando al servidor SMTP ${host} por IPv${preferredFamily}`));
+        }, timeoutMs);
+
+        timer.unref?.();
+        socket.once('connect', handleConnect);
+        socket.once('error', handleError);
+      });
+    };
   }
 
   private getSenderAddress() {
@@ -305,7 +403,13 @@ export class EmailService {
     if (message.includes('invalid login') || message.includes('authentication unsuccessful')) {
       return 'Credenciales SMTP invalidas';
     }
-    if (message.includes('econnrefused') || message.includes('enotfound') || message.includes('etimedout')) {
+    if (
+      message.includes('econnrefused') ||
+      message.includes('enotfound') ||
+      message.includes('etimedout') ||
+      message.includes('enetunreach') ||
+      message.includes('ehostunreach')
+    ) {
       return 'No se pudo conectar al servidor SMTP';
     }
 
