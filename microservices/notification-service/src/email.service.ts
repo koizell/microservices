@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { Transporter } from 'nodemailer';
 
+function normalizeSecret(value: string | undefined) {
+  return String(value ?? '').trim().replace(/\s+/g, '');
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -230,15 +234,19 @@ export class EmailService {
       return this.transporter;
     }
 
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
+    const smtpHost = String(process.env.SMTP_HOST ?? '').trim();
+    const smtpUser = String(process.env.SMTP_USER ?? '').trim();
+    const smtpPass = normalizeSecret(process.env.SMTP_PASS);
 
     if (smtpHost && smtpUser && smtpPass) {
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
         port: Number(process.env.SMTP_PORT ?? 587),
         secure: process.env.SMTP_SECURE === 'true',
+        requireTLS: process.env.SMTP_SECURE !== 'true',
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
         auth: {
           user: smtpUser,
           pass: smtpPass,
@@ -247,11 +255,14 @@ export class EmailService {
       return this.transporter;
     }
 
-    const gmailUser = process.env.GMAIL_USER;
-    const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+    const gmailUser = String(process.env.GMAIL_USER ?? '').trim();
+    const gmailAppPassword = normalizeSecret(process.env.GMAIL_APP_PASSWORD);
     if (gmailUser && gmailAppPassword) {
       this.transporter = nodemailer.createTransport({
         service: 'gmail',
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
         auth: {
           user: gmailUser,
           pass: gmailAppPassword,
