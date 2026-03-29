@@ -347,7 +347,7 @@ export class TicketController {
         <div id="analyticsMsg" class="msg"></div>
         <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
           <button class="ghost" onclick="loadAnalytics()">🔄 Actualizar</button>
-          <button class="primary" onclick="window.open('http://localhost:3006/analytics','_blank')">↗ Ver Analytics Completo</button>
+          <button class="primary" onclick="openAnalyticsDashboard()">↗ Ver Analytics Completo</button>
         </div>
         <table style="margin-top:14px">
           <thead>
@@ -367,7 +367,11 @@ export class TicketController {
   <script>
     const API = '/tickets';
     const FORCED_ROLE = '${forcedRole}';
-    const USER_SERVICE_BASE_URL = 'http://' + window.location.hostname + ':3000';
+    const HOST_NAME = window.location.hostname || 'localhost';
+    const IS_LOCAL_HOST = HOST_NAME === 'localhost' || HOST_NAME === '127.0.0.1';
+    const USER_SERVICE_BASE_URL = IS_LOCAL_HOST ? ('http://' + HOST_NAME + ':3000/users') : '/users';
+    const EVENT_SERVICE_BASE_URL = IS_LOCAL_HOST ? ('http://' + HOST_NAME + ':3001/events') : '/events';
+    const ANALYTICS_SERVICE_BASE_URL = IS_LOCAL_HOST ? ('http://' + HOST_NAME + ':3006/analytics') : '/analytics';
 
     function readSessionFromHash() {
       try {
@@ -541,7 +545,7 @@ export class TicketController {
       }
 
       refreshInFlight = (async function() {
-        const r = await fetch(USER_SERVICE_BASE_URL + '/users/auth/refresh', {
+        const r = await fetch(USER_SERVICE_BASE_URL + '/auth/refresh', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refreshToken: refreshToken }),
@@ -718,6 +722,10 @@ export class TicketController {
       document.getElementById('buyAmount').textContent = '$' + amount.toFixed(2);
     }
 
+    function openAnalyticsDashboard() {
+      window.open(ANALYTICS_SERVICE_BASE_URL, '_blank');
+    }
+
     async function loadTypes() {
       setMsg('catalogMsg', '', 'info');
       try {
@@ -728,6 +736,12 @@ export class TicketController {
         typesCache = Array.isArray(d) ? d : [];
         const rows = document.getElementById('typesRows');
         rows.innerHTML = '';
+        if (!typesCache.length) {
+          rows.innerHTML = '<tr><td colspan="10" class="small">No hay tipos de ticket registrados todavía.</td></tr>';
+          setMsg('catalogMsg', 'No hay tipos de ticket registrados todavía.', 'info');
+          fillTypeSelect();
+          return;
+        }
         typesCache.forEach(function(t){
           const available = Number(t.quantity || 0) - Number(t.quantitySold || 0);
           const tr = document.createElement('tr');
@@ -961,7 +975,7 @@ export class TicketController {
 
     async function loadEvents() {
       try {
-        const r = await fetch('http://localhost:3001/events/data');
+        const r = await fetch(EVENT_SERVICE_BASE_URL + '/data');
         if (!r.ok) return;
         const data = await r.json();
         eventsCache = Array.isArray(data) ? data : [];
@@ -988,8 +1002,8 @@ export class TicketController {
       setMsg('analyticsMsg', 'Cargando datos de analytics-service…', 'info');
       try {
         const [sumR, dataR] = await Promise.all([
-          fetch('http://localhost:3006/analytics/summary'),
-          fetch('http://localhost:3006/analytics/data?limit=7'),
+          fetch(ANALYTICS_SERVICE_BASE_URL + '/summary'),
+          fetch(ANALYTICS_SERVICE_BASE_URL + '/data?limit=7'),
         ]);
         if (!sumR.ok || !dataR.ok) throw new Error('analytics-service no disponible (puerto 3006)');
         const summary = await sumR.json();
