@@ -95,6 +95,31 @@ function extractHeaders(headers) {
   return outgoing;
 }
 
+function isStreamLike(value) {
+  return Boolean(value) && typeof value.on === 'function' && typeof value.pipe === 'function';
+}
+
+async function readRequestBody(req) {
+  if (typeof req.body === 'string' || Buffer.isBuffer(req.body)) {
+    return req.body;
+  }
+
+  if (req.body && typeof req.body === 'object' && !isStreamLike(req.body)) {
+    return JSON.stringify(req.body);
+  }
+
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  if (!chunks.length) {
+    return undefined;
+  }
+
+  return Buffer.concat(chunks);
+}
+
 module.exports = async function handler(req, res) {
   const serviceKey = String(req.query.service || '').trim();
   const restPath = normalizePathSegments(req.query.path);
@@ -118,10 +143,11 @@ module.exports = async function handler(req, res) {
     redirect: 'manual',
   };
 
-  if (!['GET', 'HEAD'].includes(req.method || 'GET') && typeof req.body !== 'undefined') {
-    requestInit.body = typeof req.body === 'string' || Buffer.isBuffer(req.body)
-      ? req.body
-      : JSON.stringify(req.body);
+  if (!['GET', 'HEAD'].includes(req.method || 'GET')) {
+    const body = await readRequestBody(req);
+    if (typeof body !== 'undefined') {
+      requestInit.body = body;
+    }
   }
 
   try {
