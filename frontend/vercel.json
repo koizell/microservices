@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)",
+      "destination": "/api/proxy/:service"
+    },
+    {
+      "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)/:path*",
+      "destination": "/api/proxy/:service/:path*"
+    }
+  ]
+}

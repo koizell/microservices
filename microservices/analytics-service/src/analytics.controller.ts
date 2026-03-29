@@ -1,0 +1,33 @@
+import { Body, Controller, Get, Header, Post, Query } from '@nestjs/common';
+import { AnalyticsService } from './analytics.service';
+
+@Controller('analytics')
+export class AnalyticsController {
+  constructor(private readonly analyticsService: AnalyticsService) {}
+
+  @Get()
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  renderUi() {
+    return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Analytics Service</title><style>:root{--bg:#f8fafc;--ink:#111827;--card:#fff;--line:#e2e8f0;--brand:#7c3aed}*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Tahoma,sans-serif;background:conic-gradient(from 120deg at 10% 10%,#e0e7ff,#f8fafc,#ede9fe,#f8fafc);color:var(--ink)}.wrap{max-width:940px;margin:24px auto;padding:0 16px}.head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px;box-shadow:0 10px 22px rgba(30,41,59,.06)}.row{display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px}input,button{padding:10px;border-radius:8px;border:1px solid #cbd5e1}button{background:var(--brand);color:#fff;border:0;cursor:pointer}.kpi{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tile{padding:12px;border:1px solid #e2e8f0;border-radius:10px;background:#faf5ff}.tile b{font-size:24px}.bar{height:8px;background:#ede9fe;border-radius:999px;overflow:hidden}.bar span{display:block;height:100%;background:#7c3aed}@media(max-width:780px){.row{grid-template-columns:1fr}.kpi{grid-template-columns:1fr}}</style><style id="ui-polish-v2">:root{--ui-bg:#f7f8fc;--ui-surface:#ffffff;--ui-text:#0f172a;--ui-muted:#5b6475;--ui-line:#dbe2ee;--ui-brand:#1d4ed8;--ui-brand-2:#1e40af}body{font-family:Manrope,ui-sans-serif,sans-serif!important;background:linear-gradient(160deg,#fef3c7 0,#f7f8fc 46%,#dbeafe 100%)!important;color:var(--ui-text)!important}.wrap{max-width:1080px!important;margin:20px auto!important;padding:0 14px!important}.hero,.head,.title{gap:10px!important;align-items:flex-end!important}.box,.card,section.card{background:var(--ui-surface)!important;border:1px solid var(--ui-line)!important;border-radius:14px!important;padding:14px!important;box-shadow:0 10px 22px rgba(15,23,42,.06)!important}h1{font-size:32px!important;line-height:1.1!important;margin:0!important}h2,h3{letter-spacing:-.01em}p,small,.mini,.meta,.help,.sub{color:var(--ui-muted)!important}input,select,button{min-height:42px!important;padding:10px 12px!important;border-radius:10px!important;border:1px solid #c7d2e5!important}input:focus,select:focus{outline:2px solid #93c5fd!important;border-color:#93c5fd!important}button{font-weight:700!important;cursor:pointer!important;transition:transform .12s ease,box-shadow .12s ease!important}button:hover{transform:translateY(-1px)}button:not(.ghost):not(.btnGhost):not(.danger):not(.warn):not(.alt){background:linear-gradient(135deg,var(--ui-brand),var(--ui-brand-2))!important;color:#fff!important;border:0!important;box-shadow:0 8px 18px rgba(29,78,216,.22)!important}button.ghost,.btnGhost{background:#fff!important;color:#1e3a8a!important;border:1px solid #bfdbfe!important}ul{padding-left:0!important}ul li,.item{border-radius:12px!important}table{border-radius:10px;overflow:hidden}th,td{padding:10px 8px!important}@media(max-width:900px){.wrap{padding:0 12px!important}.row,.row2,.row4,.grid,.geo,.gridSession,.gridFav,.kpis,.kpi{grid-template-columns:1fr!important}.title h1,h1.title,.hero h1,h1{font-size:26px!important}}</style></head><body><div class="wrap"><div class="head"><div><h1 style="margin:0">Analytics Service</h1><p style="margin:4px 0 0;color:#4b5563">Ingestion de ticket.purchased y metricas diarias.</p></div><button id="reload">Recargar</button></div><section class="card"><h3>Ingestar compra</h3><div class="row"><input id="amount" type="number" placeholder="Monto" value="120"><input id="quantity" type="number" placeholder="Cantidad" value="1"><button id="ingest">Ingestar</button><button id="demo">Demo x3</button></div></section><section class="card"><div class="kpi"><div class="tile">Total revenue hoy<br><b id="rev">0</b></div><div class="tile">Total tickets hoy<br><b id="qty">0</b></div></div><h3 style="margin-top:14px">Historico</h3><div id="history"></div></section></div><script>async function load(){const r=await fetch('/analytics/data');const d=await r.json();const history=document.getElementById('history');history.innerHTML='';let today=d.find(x=>x.day===new Date().toISOString().slice(0,10));document.getElementById('rev').textContent=today?Number(today.totalRevenue).toFixed(2):'0.00';document.getElementById('qty').textContent=today?today.totalTickets:'0';if(d.length===0){history.innerHTML='Sin datos aun.';return;}const max=Math.max(...d.map(x=>Number(x.totalRevenue)||0),1);d.forEach(x=>{const pct=Math.max(3,Math.round((Number(x.totalRevenue)||0)*100/max));const row=document.createElement('div');row.style.margin='8px 0';row.innerHTML='<div><strong>'+x.day+'</strong> | revenue: '+Number(x.totalRevenue).toFixed(2)+' | tickets: '+x.totalTickets+'</div><div class="bar"><span style="width:'+pct+'%"></span></div>';history.appendChild(row);});}async function ingest(amount,quantity){await fetch('/analytics/ingest/ticket-purchased',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:Number(amount),quantity:Number(quantity)})});}document.getElementById('ingest').onclick=async()=>{if(!confirm('Confirmar ingesta de compra?')){return;}await ingest(document.getElementById('amount').value,document.getElementById('quantity').value);load();};document.getElementById('demo').onclick=async()=>{if(!confirm('Confirmar ejecucion de demo x3?')){return;}await ingest(100,1);await ingest(230,2);await ingest(70,1);load();};document.getElementById('reload').onclick=load;load();setInterval(()=>{if(document.visibilityState==='visible'){load();}},15000);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){load();}});</script></body></html>`;
+  }
+
+  @Get('health')
+  status() {
+    return { service: 'analytics-service', status: 'ok' };
+  }
+
+  @Post('ingest/ticket-purchased')
+  async ingest(@Body() body: { amount: number; quantity?: number }) {
+    return await this.analyticsService.ingestTicketPurchased(body);
+  }
+
+  @Get('summary')
+  async summary() {
+    return await this.analyticsService.getSummary();
+  }
+
+  @Get('data')
+  async listDailySales(@Query('limit') limit?: string) {
+    return await this.analyticsService.listDailySales(Number(limit ?? 30));
+  }
+}

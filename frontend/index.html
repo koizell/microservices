@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Microservicios</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Panel de Microservicios</h1>
+    <p id="deploymentMode">Preparando conexion entre Vercel y Render</p>
+    <div class="header-actions">
+      <span id="gatewayStatus" class="status-pill">Verificando gateway</span>
+      <a id="openGateway" class="quick-link" href="/gateway" target="_blank" rel="noreferrer">Abrir gateway</a>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h2>User Service</h2>
+      <form id="userForm">
+        <input id="userName" placeholder="Nombre" required>
+        <input id="userEmail" type="email" placeholder="Email" required>
+        <input id="userPassword" type="password" placeholder="Password" required>
+        <button type="submit">Crear Usuario</button>
+      </form>
+      <button class="secondary" id="loadUsers">Recargar Usuarios</button>
+      <ul id="usersList"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Event Service</h2>
+      <form id="eventForm">
+        <input id="eventTitle" placeholder="Titulo" required>
+        <input id="eventDate" type="date" required>
+        <input id="eventLocation" placeholder="Lugar" required>
+        <button type="submit">Crear Evento</button>
+      </form>
+      <button class="secondary" id="loadEvents">Recargar Eventos</button>
+      <ul id="eventsList"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Ticketing Service</h2>
+      <form id="ticketForm">
+        <input id="ticketTitle" placeholder="Titulo" required>
+        <input id="ticketDescription" placeholder="Descripcion" required>
+        <select id="ticketStatus" required>
+          <option value="open">open</option>
+          <option value="in_progress">in_progress</option>
+          <option value="closed">closed</option>
+        </select>
+        <button type="submit">Crear Ticket</button>
+      </form>
+      <button class="secondary" id="loadTickets">Recargar Tickets</button>
+      <ul id="ticketsList"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Notification Service</h2>
+      <form id="notificationForm">
+        <input id="notificationMessage" placeholder="Mensaje" required>
+        <input id="notificationRecipient" placeholder="Destinatario" required>
+        <button type="submit">Crear Notificacion</button>
+      </form>
+      <button class="secondary" id="loadNotifications">Recargar Notificaciones</button>
+      <ul id="notificationsList"></ul>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script>
+    const host = window.location.hostname;
+    const isLocalHost = window.location.protocol === 'file:'
+      || /^(localhost|127\.0\.0\.1)$/.test(host)
+      || /^192\.168\./.test(host)
+      || /^10\./.test(host)
+      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+
+    window.__APP_CONFIG__ = isLocalHost
+      ? {
+          deployment: 'local',
+          gatewayUiUrl: `http://${host}:3008/gateway`,
+          serviceEndpoints: {
+            users: `http://${host}:3000/users`,
+            events: `http://${host}:3001/events`,
+            tickets: `http://${host}:3002/tickets`,
+            notifications: `http://${host}:3003/notifications`,
+            gateway: `http://${host}:3008/gateway`,
+          },
+        }
+      : {
+          deployment: 'vercel-render',
+          gatewayUiUrl: '/gateway',
+          serviceEndpoints: {
+            users: '/users',
+            events: '/events',
+            tickets: '/tickets',
+            notifications: '/notifications',
+            gateway: '/gateway',
+          },
+        };
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>
