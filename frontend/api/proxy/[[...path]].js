@@ -35,6 +35,17 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 
+const REQUEST_BLOCKED_HEADERS = new Set([
+  ...HOP_BY_HOP_HEADERS,
+  'accept-encoding',
+]);
+
+const RESPONSE_BLOCKED_HEADERS = new Set([
+  ...HOP_BY_HOP_HEADERS,
+  'content-encoding',
+  'etag',
+]);
+
 function normalizeBaseUrl(value) {
   const candidate = String(value || '')
     .trim()
@@ -77,12 +88,14 @@ function extractHeaders(headers) {
   const outgoing = {};
 
   Object.entries(headers || {}).forEach(([key, value]) => {
-    if (typeof value === 'undefined' || HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
+    if (typeof value === 'undefined' || REQUEST_BLOCKED_HEADERS.has(key.toLowerCase())) {
       return;
     }
 
     outgoing[key] = Array.isArray(value) ? value.join(', ') : value;
   });
+
+  outgoing['accept-encoding'] = 'identity';
 
   return outgoing;
 }
@@ -125,7 +138,7 @@ module.exports = async function handler(req, res) {
     res.status(upstream.status);
 
     upstream.headers.forEach((value, key) => {
-      if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
+      if (RESPONSE_BLOCKED_HEADERS.has(key.toLowerCase())) {
         return;
       }
 
