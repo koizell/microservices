@@ -10,6 +10,18 @@ const SERVICE_ENV_MAP = {
   mobile: 'MOBILE_SERVICE_RENDER_URL',
 };
 
+const SERVICE_DEFAULT_URLS = {
+  gateway: 'https://eventhive-api-gateway.onrender.com',
+  users: 'https://eventhive-user-service.onrender.com',
+  events: 'https://eventhive-event-service.onrender.com',
+  tickets: 'https://eventhive-ticketing-service.onrender.com',
+  notifications: 'https://eventhive-notification-service.onrender.com',
+  credentials: 'https://eventhive-credential-service.onrender.com',
+  analytics: 'https://eventhive-analytics-service.onrender.com',
+  agenda: 'https://eventhive-agenda-service.onrender.com',
+  mobile: 'https://eventhive-mobile-api-service.onrender.com',
+};
+
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'content-length',
@@ -88,10 +100,10 @@ module.exports = async function handler(req, res) {
   }
 
   const envKey = SERVICE_ENV_MAP[serviceKey];
-  const baseUrl = normalizeBaseUrl(process.env[envKey]);
+  const baseUrl = normalizeBaseUrl(process.env[envKey]) || SERVICE_DEFAULT_URLS[serviceKey];
   if (!baseUrl) {
     return res.status(500).json({
-      message: `Falta configurar ${envKey} en Vercel`,
+      message: `No se encontro URL para el servicio ${serviceKey}`,
     });
   }
 
