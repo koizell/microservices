@@ -8,16 +8,16 @@ export class Event {
   @Column()
   title: string;
 
-  @Column()
+  @Column({ type: 'timestamp' })
   date: Date;
 
-  @Column({ type: 'date', nullable: true })
+  @Column({ name: 'end_date', type: 'date', nullable: true })
   endDate: string | null;
 
-  @Column({ default: '09:00' })
+  @Column({ name: 'start_time', default: '09:00' })
   startTime: string;
 
-  @Column({ default: '18:00' })
+  @Column({ name: 'end_time', default: '18:00' })
   endTime: string;
 
   @Column({ type: 'text', nullable: true })
@@ -26,18 +26,18 @@ export class Event {
   @Column()
   location: string;
 
-  @Column({ type: 'simple-json', nullable: true })
+  @Column({ name: 'active_weekdays', type: 'simple-json', nullable: true })
   activeWeekdays: string[] | null;
 
-  @Column({ default: false })
+  @Column({ name: 'is_archived', default: false })
   isArchived: boolean;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'archived_at', type: 'timestamp', nullable: true })
   archivedAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
   updatedAt: Date;
 }

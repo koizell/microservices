@@ -31,6 +31,37 @@ CREATE TABLE IF NOT EXISTS events (
   location VARCHAR(200) NOT NULL
 );
 
+ALTER TABLE events
+  ADD COLUMN IF NOT EXISTS end_date DATE NULL,
+  ADD COLUMN IF NOT EXISTS start_time VARCHAR(5) NOT NULL DEFAULT '09:00',
+  ADD COLUMN IF NOT EXISTS end_time VARCHAR(5) NOT NULL DEFAULT '18:00',
+  ADD COLUMN IF NOT EXISTS description TEXT NULL,
+  ADD COLUMN IF NOT EXISTS active_weekdays TEXT NULL,
+  ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP NULL,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+UPDATE events
+SET
+  end_date = COALESCE(end_date, date::date),
+  start_time = COALESCE(NULLIF(start_time, ''), '09:00'),
+  end_time = COALESCE(NULLIF(end_time, ''), '18:00'),
+  active_weekdays = COALESCE(NULLIF(active_weekdays, ''), '["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]'),
+  is_archived = COALESCE(is_archived, FALSE),
+  created_at = COALESCE(created_at, CURRENT_TIMESTAMP),
+  updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
+WHERE end_date IS NULL
+  OR start_time IS NULL
+  OR start_time = ''
+  OR end_time IS NULL
+  OR end_time = ''
+  OR active_weekdays IS NULL
+  OR active_weekdays = ''
+  OR is_archived IS NULL
+  OR created_at IS NULL
+  OR updated_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS tickets (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   title VARCHAR(200) NOT NULL,

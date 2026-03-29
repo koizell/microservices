@@ -1,10 +1,23 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Event } from './event.entity';
 
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
 type Weekday = (typeof WEEKDAYS)[number];
+const DEFAULT_ACTIVE_WEEKDAYS = JSON.stringify(WEEKDAYS);
+
+const EVENT_SCHEMA_COLUMNS = [
+  { legacyName: 'endDate', columnName: 'end_date', definition: 'DATE NULL' },
+  { legacyName: 'startTime', columnName: 'start_time', definition: "VARCHAR(5) NOT NULL DEFAULT '09:00'" },
+  { legacyName: 'endTime', columnName: 'end_time', definition: "VARCHAR(5) NOT NULL DEFAULT '18:00'" },
+  { legacyName: null, columnName: 'description', definition: 'TEXT NULL' },
+  { legacyName: 'activeWeekdays', columnName: 'active_weekdays', definition: 'TEXT NULL' },
+  { legacyName: 'isArchived', columnName: 'is_archived', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+  { legacyName: 'archivedAt', columnName: 'archived_at', definition: 'TIMESTAMP NULL' },
+  { legacyName: 'createdAt', columnName: 'created_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+  { legacyName: 'updatedAt', columnName: 'updated_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+] as const;
 
 type EventInput = Partial<Event> & {
   startDate?: string | Date;
@@ -16,11 +29,78 @@ type EventInput = Partial<Event> & {
 };
 
 @Injectable()
-export class AppService {
+export class AppService implements OnModuleInit {
+  private readonly logger = new Logger(AppService.name);
+
   constructor(
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
   ) {}
+
+  async onModuleInit() {
+    await this.ensureEventSchema();
+  }
+
+  private async ensureEventSchema() {
+    for (const column of EVENT_SCHEMA_COLUMNS) {
+      if (column.legacyName) {
+        await this.renameLegacyColumnIfNeeded(column.legacyName, column.columnName);
+      }
+
+      await this.dataSource.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS ${column.columnName} ${column.definition}`);
+    }
+
+    await this.dataSource.query(`
+      UPDATE events
+      SET
+        end_date = COALESCE(end_date, date::date),
+        start_time = COALESCE(NULLIF(start_time, ''), '09:00'),
+        end_time = COALESCE(NULLIF(end_time, ''), '18:00'),
+        active_weekdays = COALESCE(NULLIF(active_weekdays, ''), '${DEFAULT_ACTIVE_WEEKDAYS}'),
+        is_archived = COALESCE(is_archived, FALSE),
+        created_at = COALESCE(created_at, CURRENT_TIMESTAMP),
+        updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
+      WHERE end_date IS NULL
+        OR start_time IS NULL
+        OR start_time = ''
+        OR end_time IS NULL
+        OR end_time = ''
+        OR active_weekdays IS NULL
+        OR active_weekdays = ''
+        OR is_archived IS NULL
+        OR created_at IS NULL
+        OR updated_at IS NULL
+    `);
+
+    this.logger.log('Verified events table schema');
+  }
+
+  private async renameLegacyColumnIfNeeded(legacyName: string, columnName: string) {
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'events'
+            AND column_name = '${legacyName}'
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'events'
+            AND column_name = '${columnName}'
+        ) THEN
+          EXECUTE 'ALTER TABLE events RENAME COLUMN "${legacyName}" TO ${columnName}';
+        END IF;
+      END
+      $$;
+    `);
+  }
 
   private formatDateOnly(date: Date): string {
     const year = date.getFullYear();
