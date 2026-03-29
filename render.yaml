@@ -109,6 +109,12 @@ services:
         value: "false"
       - key: EMAIL_FROM
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
+      - key: RESEND_REPLY_TO
+        sync: false
 
   - type: web
     runtime: node

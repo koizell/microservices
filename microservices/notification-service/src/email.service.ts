@@ -27,6 +27,17 @@ function resolveSmtpIpFamily(host: string) {
   return configuredFamily === '6' ? 6 : 4;
 }
 
+type ResendConfig = {
+  apiKey: string;
+  from: string;
+  replyTo?: string;
+};
+
+type ResendConfigResult = {
+  config: ResendConfig | null;
+  incompleteReason?: string;
+};
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -227,6 +238,16 @@ export class EmailService {
     missingSmtpLog: string;
     errorLog: string;
   }): Promise<{ sent: boolean; reason?: string }> {
+    const resendConfigResult = this.getResendConfigResult();
+    if (resendConfigResult.incompleteReason) {
+      this.logger.warn(resendConfigResult.incompleteReason);
+      return { sent: false, reason: 'Configuracion incompleta de Resend' };
+    }
+
+    if (resendConfigResult.config) {
+      return await this.sendWithResend(resendConfigResult.config, params);
+    }
+
     const transporter = this.getTransporter();
     if (!transporter) {
       this.logger.warn(params.missingSmtpLog);
@@ -244,7 +265,79 @@ export class EmailService {
 
       return { sent: true };
     } catch (error) {
-      const reason = this.getMailErrorReason(error);
+      const reason = this.getDeliveryErrorReason(error, 'SMTP');
+      this.logger.error(`${params.errorLog}: ${reason}`);
+      return { sent: false, reason };
+    }
+  }
+
+  private getResendConfigResult(): ResendConfigResult {
+    const apiKey = normalizeSecret(process.env.RESEND_API_KEY);
+    const from = String(process.env.RESEND_FROM ?? process.env.EMAIL_FROM ?? '').trim();
+    const replyTo = String(process.env.RESEND_REPLY_TO ?? '').trim();
+    const hasAnyResendConfig = Boolean(apiKey || replyTo || String(process.env.RESEND_FROM ?? '').trim());
+
+    if (!apiKey || !from) {
+      return hasAnyResendConfig
+        ? {
+            config: null,
+            incompleteReason:
+              'Resend esta configurado parcialmente. Define RESEND_API_KEY y RESEND_FROM para usar envio por HTTPS.',
+          }
+        : { config: null };
+    }
+
+    return {
+      config: {
+        apiKey,
+        from,
+        replyTo: replyTo || undefined,
+      },
+    };
+  }
+
+  private async sendWithResend(
+    config: ResendConfig,
+    params: {
+      to: string;
+      subject: string;
+      html: string;
+      text: string;
+      errorLog: string;
+    },
+  ): Promise<{ sent: boolean; reason?: string }> {
+    const payload: Record<string, unknown> = {
+      from: config.from,
+      to: [params.to],
+      subject: params.subject,
+      html: params.html,
+      text: params.text,
+    };
+
+    if (config.replyTo) {
+      payload.reply_to = config.replyTo;
+    }
+
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const providerBody = await response.text();
+        const reason = this.getResendErrorReason(response.status, providerBody);
+        this.logger.error(`${params.errorLog}: ${reason}`);
+        return { sent: false, reason };
+      }
+
+      return { sent: true };
+    } catch (error) {
+      const reason = this.getDeliveryErrorReason(error, 'Resend');
       this.logger.error(`${params.errorLog}: ${reason}`);
       return { sent: false, reason };
     }
@@ -375,6 +468,7 @@ export class EmailService {
   private getSenderAddress() {
     return (
       process.env.EMAIL_FROM ??
+      process.env.RESEND_FROM ??
       process.env.SMTP_USER ??
       process.env.GMAIL_USER ??
       'no-reply@eventhive.local'
@@ -394,13 +488,38 @@ export class EmailService {
       .replace(/'/g, '&#39;');
   }
 
-  private getMailErrorReason(error: unknown): string {
+  private getResendErrorReason(status: number, providerBody: string): string {
+    const normalizedBody = providerBody.replace(/\s+/g, ' ').trim();
+
+    if (status === 401 || status === 403) {
+      return 'API key de Resend invalida';
+    }
+
+    if (status === 422) {
+      if (normalizedBody.toLowerCase().includes('verify a domain')) {
+        return 'Resend requiere un remitente o dominio verificado';
+      }
+
+      return normalizedBody
+        ? `Resend rechazo el correo: ${normalizedBody}`
+        : 'Resend rechazo el correo';
+    }
+
+    return normalizedBody
+      ? `Error Resend (${status}): ${normalizedBody}`
+      : `Error Resend (${status})`;
+  }
+
+  private getDeliveryErrorReason(error: unknown, provider: 'SMTP' | 'Resend'): string {
     if (!(error instanceof Error)) {
       return 'No se pudo enviar el correo';
     }
 
     const message = error.message.toLowerCase();
-    if (message.includes('invalid login') || message.includes('authentication unsuccessful')) {
+    if (
+      provider === 'SMTP' &&
+      (message.includes('invalid login') || message.includes('authentication unsuccessful'))
+    ) {
       return 'Credenciales SMTP invalidas';
     }
     if (
@@ -408,11 +527,14 @@ export class EmailService {
       message.includes('enotfound') ||
       message.includes('etimedout') ||
       message.includes('enetunreach') ||
-      message.includes('ehostunreach')
+      message.includes('ehostunreach') ||
+      message.includes('fetch failed')
     ) {
-      return 'No se pudo conectar al servidor SMTP';
+      return provider === 'SMTP'
+        ? 'No se pudo conectar al servidor SMTP'
+        : 'No se pudo conectar al proveedor de correo';
     }
 
-    return `Error SMTP: ${error.message}`;
+    return `Error ${provider}: ${error.message}`;
   }
 }
