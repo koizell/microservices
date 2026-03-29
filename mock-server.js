@@ -5,6 +5,89 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'frontend')));
 
+const proxyTargets = {
+  users: 'http://localhost:3000',
+  events: 'http://localhost:3001',
+  tickets: 'http://localhost:3002',
+  notifications: 'http://localhost:3003',
+  credentials: 'http://localhost:3004',
+  agenda: 'http://localhost:3005',
+  analytics: 'http://localhost:3006',
+  mobile: 'http://localhost:3007',
+  gateway: 'http://localhost:3008',
+};
+
+const hopByHopHeaders = new Set([
+  'connection',
+  'content-length',
+  'host',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+function extractProxyHeaders(headers) {
+  const outgoing = {};
+
+  Object.entries(headers || {}).forEach(([key, value]) => {
+    if (typeof value === 'undefined' || hopByHopHeaders.has(key.toLowerCase())) {
+      return;
+    }
+
+    outgoing[key] = Array.isArray(value) ? value.join(', ') : value;
+  });
+
+  return outgoing;
+}
+
+app.use(async (req, res, next) => {
+  const pathParts = req.path.split('/').filter(Boolean);
+  const serviceKey = pathParts[0];
+
+  if (!serviceKey || !Object.prototype.hasOwnProperty.call(proxyTargets, serviceKey)) {
+    return next();
+  }
+
+  const targetUrl = new URL(req.originalUrl, proxyTargets[serviceKey]);
+  const requestInit = {
+    method: req.method,
+    headers: extractProxyHeaders(req.headers),
+    redirect: 'manual',
+  };
+
+  if (!['GET', 'HEAD'].includes(req.method || 'GET') && typeof req.body !== 'undefined' && Object.keys(req.body || {}).length > 0) {
+    requestInit.body = JSON.stringify(req.body);
+    if (!requestInit.headers['content-type']) {
+      requestInit.headers['content-type'] = 'application/json';
+    }
+  }
+
+  try {
+    const upstream = await fetch(targetUrl, requestInit);
+    res.status(upstream.status);
+
+    upstream.headers.forEach((value, key) => {
+      if (hopByHopHeaders.has(key.toLowerCase())) {
+        return;
+      }
+
+      res.setHeader(key, value);
+    });
+
+    const payload = Buffer.from(await upstream.arrayBuffer());
+    return res.send(payload);
+  } catch (error) {
+    return res.status(502).json({
+      message: `No se pudo contactar el servicio ${serviceKey}`,
+      reason: error instanceof Error ? error.message : 'Error desconocido',
+    });
+  }
+});
+
 // Mock data
 const mockUsers = [];
 const mockEvents = [];

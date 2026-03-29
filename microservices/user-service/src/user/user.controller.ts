@@ -17,6 +17,11 @@ export class UserController {
 	@Get()
 	@Header('Content-Type', 'text/html; charset=utf-8')
 	renderUi() {
+    const baseUrl = String(process.env.APP_BASE_URL ?? '').trim().replace(/\/+$/, '');
+  const targetUrl = baseUrl || 'http://localhost:3009';
+    const normalizedTargetUrl = targetUrl === '/' ? targetUrl : `${targetUrl}/`;
+    return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=${normalizedTargetUrl}"><title>EventHive</title></head><body><script>window.location.replace('${normalizedTargetUrl}');</script></body></html>`;
+
 		return `<!doctype html>
 <html lang="es">
 <head>
@@ -1136,17 +1141,19 @@ async function deleteTicketType(id) {
 
   @Get('confirm')
   async confirmEmail(@Query('token') token: string, @Res() res: any) {
+    const baseUrl = String(process.env.APP_BASE_URL ?? '').trim().replace(/\/+$/, '');
+    const frontendRoot = baseUrl || 'http://localhost:3009';
     const result = await this.userService.confirmEmail(token);
     if (result.ok && result.reason === 'verified') {
-      return res.redirect('/users?confirmed=1');
+			return res.redirect(`${frontendRoot}/?confirmed=1`);
     }
     if (result.ok && result.reason === 'already_verified') {
-      return res.redirect('/users?confirmed=1');
+			return res.redirect(`${frontendRoot}/?confirmed=1`);
     }
     if (result.reason === 'expired') {
-      return res.redirect('/users?confirmed=expired');
+			return res.redirect(`${frontendRoot}/?confirmed=expired`);
     }
-    return res.redirect('/users?confirmed=invalid');
+		return res.redirect(`${frontendRoot}/?confirmed=invalid`);
   }
 
 	@Post('data')

@@ -1,107 +1,259 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Panel Microservicios</title>
-  <link rel="stylesheet" href="styles.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EventHive · Plataforma de Eventos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<script src="/app.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1>Panel de Microservicios</h1>
-    <p id="deploymentMode">Preparando conexion entre Vercel y Render</p>
-    <div class="header-actions">
-      <span id="gatewayStatus" class="status-pill">Verificando gateway</span>
-      <a id="openGateway" class="quick-link" href="/gateway" target="_blank" rel="noreferrer">Abrir gateway</a>
+
+<div class="card" id="card">
+  <div class="card-inner" id="cardInner">
+    <div class="logo">
+      <svg width="36" height="36" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <path d="M20 3L35.6 12V28L20 37L4.4 28V12L20 3Z" fill="#e85d04" opacity=".12" stroke="#e85d04" stroke-width="1.6"></path>
+        <path d="M13 19l5 5 9-9" stroke="#e85d04" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      <span class="logo-text">Event<em>Hive</em></span>
     </div>
-  </header>
+    <p class="tagline">La plataforma inteligente para gestion de eventos profesionales</p>
 
-  <main class="grid">
-    <section class="card">
-      <h2>User Service</h2>
-      <form id="userForm">
-        <input id="userName" placeholder="Nombre" required>
-        <input id="userEmail" type="email" placeholder="Email" required>
-        <input id="userPassword" type="password" placeholder="Password" required>
-        <button type="submit">Crear Usuario</button>
-      </form>
-      <button class="secondary" id="loadUsers">Recargar Usuarios</button>
-      <ul id="usersList"></ul>
-    </section>
+    <div class="view active" id="vLogin">
+      <h2 class="view-title">Bienvenido de nuevo</h2>
+      <p class="view-sub">Accede a tu cuenta y gestiona todos tus eventos desde un solo lugar</p>
+      <div id="alertLogin" class="alert"></div>
+      <div class="field">
+        <label>Correo Electronico</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 7 10-7"></path></svg></span>
+          <input id="loginEmail" type="email" placeholder="ejemplo@correo.com" autocomplete="email">
+        </div>
+      </div>
+      <div class="field">
+        <label>Contrasena</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span>
+          <input id="loginPw" type="password" placeholder="••••••••" autocomplete="current-password">
+          <button type="button" class="toggle-pw" id="tpLogin" onclick="togglePw('loginPw','tpLogin')" aria-label="Mostrar u ocultar contrasena"></button>
+        </div>
+      </div>
+      <button class="btn-primary" id="loginBtn" onclick="doLogin()">Iniciar sesion</button>
+      <div class="links">
+        <button class="link" onclick="showView('vForgot')">¿Olvidaste tu contrasena?</button>
+        <button class="link" onclick="showView('vRegister')">Crear cuenta →</button>
+      </div>
+    </div>
 
-    <section class="card">
-      <h2>Event Service</h2>
-      <form id="eventForm">
-        <input id="eventTitle" placeholder="Titulo" required>
-        <input id="eventDate" type="date" required>
-        <input id="eventLocation" placeholder="Lugar" required>
-        <button type="submit">Crear Evento</button>
-      </form>
-      <button class="secondary" id="loadEvents">Recargar Eventos</button>
-      <ul id="eventsList"></ul>
-    </section>
+    <div class="view" id="vRegister">
+      <h2 class="view-title">Crea tu cuenta</h2>
+      <p class="view-sub">Unete a EventHive y empieza a organizar eventos extraordinarios</p>
+      <div id="alertReg" class="alert"></div>
+      <div class="field">
+        <label>Nombre completo</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"></path></svg></span>
+          <input id="regName" type="text" placeholder="Juan Garcia" autocomplete="name">
+        </div>
+      </div>
+      <div class="field">
+        <label>Correo Electronico</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 7 10-7"></path></svg></span>
+          <input id="regEmail" type="email" placeholder="ejemplo@correo.com" autocomplete="email">
+        </div>
+      </div>
+      <div class="field">
+        <label>Contrasena</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span>
+          <input id="regPw" type="password" placeholder="Min. 8 caracteres" autocomplete="new-password">
+          <button type="button" class="toggle-pw" id="tpReg" onclick="togglePw('regPw','tpReg')" aria-label="Mostrar u ocultar contrasena"></button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Tipo de cuenta</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>
+          <select id="regType">
+            <option value="standard">Participante</option>
+            <option value="admin">Organizador</option>
+            <option value="guest">Invitado</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn-primary" id="regBtn" onclick="doRegister()">Registrarme en EventHive</button>
+      <div class="links center">
+        <button class="link" onclick="showView('vLogin')">← Ya tengo una cuenta</button>
+      </div>
+    </div>
 
-    <section class="card">
-      <h2>Ticketing Service</h2>
-      <form id="ticketForm">
-        <input id="ticketTitle" placeholder="Titulo" required>
-        <input id="ticketDescription" placeholder="Descripcion" required>
-        <select id="ticketStatus" required>
-          <option value="open">open</option>
-          <option value="in_progress">in_progress</option>
-          <option value="closed">closed</option>
-        </select>
-        <button type="submit">Crear Ticket</button>
-      </form>
-      <button class="secondary" id="loadTickets">Recargar Tickets</button>
-      <ul id="ticketsList"></ul>
-    </section>
+    <div class="view" id="vForgot">
+      <h2 class="view-title">Recuperar contrasena</h2>
+      <p class="view-sub">Ingresa tu correo y te enviaremos las instrucciones para recuperar el acceso</p>
+      <div id="alertForgot" class="alert"></div>
+      <div class="field">
+        <label>Correo Electronico</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 7 10-7"></path></svg></span>
+          <input id="forgotEmail" type="email" placeholder="ejemplo@correo.com" autocomplete="email">
+        </div>
+      </div>
+      <button class="btn-primary" onclick="doForgot()">Enviar instrucciones de recuperacion</button>
+      <div class="links center">
+        <button class="link" onclick="showView('vLogin')">← Volver al inicio de sesion</button>
+      </div>
+    </div>
 
-    <section class="card">
-      <h2>Notification Service</h2>
-      <form id="notificationForm">
-        <input id="notificationMessage" placeholder="Mensaje" required>
-        <input id="notificationRecipient" placeholder="Destinatario" required>
-        <button type="submit">Crear Notificacion</button>
-      </form>
-      <button class="secondary" id="loadNotifications">Recargar Notificaciones</button>
-      <ul id="notificationsList"></ul>
-    </section>
-  </main>
+    <div class="view" id="vReset">
+      <h2 class="view-title">Nueva contrasena</h2>
+      <p class="view-sub">Ingresa una nueva contrasena para completar el restablecimiento de tu cuenta</p>
+      <div id="alertReset" class="alert"></div>
+      <div class="field">
+        <label>Nueva contrasena</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span>
+          <input id="resetPw" type="password" placeholder="Min. 8 caracteres" autocomplete="new-password">
+          <button type="button" class="toggle-pw" id="tpReset" onclick="togglePw('resetPw','tpReset')" aria-label="Mostrar u ocultar contrasena"></button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Confirmar contrasena</label>
+        <div class="field-wrap">
+          <span class="field-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span>
+          <input id="resetPwConfirm" type="password" placeholder="Repite la contrasena" autocomplete="new-password">
+        </div>
+      </div>
+      <button class="btn-primary" id="resetBtn" onclick="doResetPassword()">Guardar nueva contrasena</button>
+      <div class="links center">
+        <button class="link" onclick="showView('vLogin')">← Volver al inicio de sesion</button>
+      </div>
+    </div>
+  </div>
 
-  <div id="toast"></div>
-  <script>
-    const host = window.location.hostname;
-    const isLocalHost = window.location.protocol === 'file:'
-      || /^(localhost|127\.0\.0\.1)$/.test(host)
-      || /^192\.168\./.test(host)
-      || /^10\./.test(host)
-      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+  <div id="vSession" class="app-shell">
+    <header class="app-topbar">
+      <div class="top-brand">Event<em>Hive</em></div>
+      <nav class="top-nav">
+        <button id="tabInicio" class="active" onclick="switchPanel('inicio', this)"><span class="ico">🏠</span><span>Inicio</span></button>
+        <button id="tabEventos" onclick="switchPanel('eventos', this)"><span class="ico">📅</span><span>Eventos</span></button>
+        <button id="tabTickets" data-roles="standard,admin" onclick="switchPanel('tickets', this)"><span class="ico">🎫</span><span>Tickets</span></button>
+        <button id="tabCredencial" data-roles="standard,admin" onclick="switchPanel('credencial', this)"><span class="ico">🔐</span><span>Credencial</span></button>
+        <button id="tabAgenda" data-roles="standard,admin" onclick="switchPanel('agenda', this)"><span class="ico">📆</span><span>Agenda</span></button>
+        <button id="tabNotifs" data-roles="standard,admin" onclick="switchPanel('notificaciones', this)"><span class="ico">🔔</span><span>Avisos</span></button>
+        <button id="tabAnalytica" data-roles="admin" onclick="switchPanel('analytica', this)"><span class="ico">📊</span><span>Analitica</span></button>
+        <button id="tabAdmin" data-roles="admin" onclick="switchPanel('admin', this)"><span class="ico">🛠️</span><span>Admin</span></button>
+      </nav>
+      <div class="top-user">
+        <span id="sessRole" class="role-pill"></span>
+        <button class="btn-mini" id="copyTokenPanel" onclick="copyToken()">Copiar token</button>
+        <button class="btn-mini logout" onclick="doLogout()">Cerrar sesion</button>
+      </div>
+    </header>
 
-    window.__APP_CONFIG__ = isLocalHost
-      ? {
-          deployment: 'local',
-          gatewayUiUrl: `http://${host}:3008/gateway`,
-          serviceEndpoints: {
-            users: `http://${host}:3000/users`,
-            events: `http://${host}:3001/events`,
-            tickets: `http://${host}:3002/tickets`,
-            notifications: `http://${host}:3003/notifications`,
-            gateway: `http://${host}:3008/gateway`,
-          },
-        }
-      : {
-          deployment: 'vercel-render',
-          gatewayUiUrl: '/gateway',
-          serviceEndpoints: {
-            users: '/users',
-            events: '/events',
-            tickets: '/tickets',
-            notifications: '/notifications',
-            gateway: '/gateway',
-          },
-        };
-  </script>
-  <script src="app.js"></script>
+    <main class="app-main" id="appMain">
+      <section id="panel-inicio" class="panel active">
+        <div class="hero">
+          <h2 id="sessGreet">Hola</h2>
+          <p id="sessEmail"></p>
+        </div>
+        <div class="grid-cards">
+          <article class="panel-card">
+            <div class="head"><span class="ico">👤</span><span>Cuenta</span></div>
+            <p>Tu identificador es <strong id="sessId"></strong>.</p>
+            <button class="cta" onclick="switchPanel('notificaciones', document.getElementById('tabNotifs'))">Ver notificaciones</button>
+          </article>
+          <article class="panel-card standard-only" data-role-group="buyer">
+            <div class="head"><span class="ico">🎟️</span><span>Compra rapida</span></div>
+            <p>Accede al flujo de compra de tickets y a tus credenciales digitales.</p>
+            <button class="cta" onclick="switchPanel('tickets', document.getElementById('tabTickets'))">Ir a Tickets</button>
+          </article>
+          <article class="panel-card admin-only">
+            <div class="head"><span class="ico">📊</span><span>Centro de control</span></div>
+            <p>Gestiona usuarios, eventos y metricas desde el panel administrativo.</p>
+            <button class="cta" onclick="switchPanel('admin', document.getElementById('tabAdmin'))">Abrir Admin</button>
+          </article>
+          <article class="panel-card guest-only">
+            <div class="head"><span class="ico">👀</span><span>Modo invitado</span></div>
+            <p>Acceso de lectura. Explora eventos disponibles y registrate para acceder a tickets, agenda y mas.</p>
+            <button class="cta" onclick="switchPanel('eventos', document.getElementById('tabEventos'))">Explorar eventos</button>
+          </article>
+        </div>
+      </section>
+
+      <section id="panel-eventos" class="panel service-panel">
+        <div class="service-embed">
+          <div class="service-embed-bar">
+            <span></span>
+            <button onclick="openService('event')">Abrir en pestana</button>
+          </div>
+          <iframe id="eventFrame" class="service-embed-frame" title="Event Service"></iframe>
+        </div>
+      </section>
+
+      <section id="panel-tickets" class="panel service-panel">
+        <div class="service-embed">
+          <div class="service-embed-bar">
+            <span>Ticketing Service cargado dentro del panel principal.</span>
+            <button onclick="openService('ticketing')">Abrir aparte</button>
+          </div>
+          <iframe id="ticketingFrame" class="service-embed-frame" title="Ticketing Service"></iframe>
+        </div>
+      </section>
+
+      <section id="panel-credencial" class="panel">
+        <div class="hero"><h2>Credenciales Digitales</h2><p>Tus codigos QR de acceso y validacion de entrada al evento.</p></div>
+        <div class="grid-cards">
+          <article class="panel-card"><div class="head"><span class="ico">🔐</span><span>Mi QR de acceso</span></div><p>Genera o descarga tu credencial digital para ingresar al evento.</p><button class="cta" onclick="openService('credential')">Ver credencial</button></article>
+          <article class="panel-card standard-only"><div class="head"><span class="ico">📋</span><span>Mis entradas</span></div><p>Revisa todas las entradas vinculadas a tu cuenta.</p><button class="cta" onclick="openService('ticketing')">Ver entradas</button></article>
+          <article class="panel-card admin-only"><div class="head"><span class="ico">📷</span><span>Validar en puerta</span></div><p>Escanea y valida credenciales en los puntos de acceso en tiempo real.</p><button class="cta" onclick="openService('credential', '/validate')">Validar acceso</button></article>
+        </div>
+      </section>
+
+      <section id="panel-agenda" class="panel">
+        <div class="hero"><h2>Agenda</h2><p>Programacion de sesiones, talleres y ponentes del evento.</p></div>
+        <div class="grid-cards">
+          <article class="panel-card"><div class="head"><span class="ico">📆</span><span>Programacion</span></div><p>Consulta todas las sesiones y horarios del evento.</p><button class="cta" onclick="openService('agenda')">Ver agenda</button></article>
+          <article class="panel-card standard-only"><div class="head"><span class="ico">⭐</span><span>Mis favoritos</span></div><p>Sesiones marcadas para construir tu agenda personalizada.</p><button class="cta" onclick="openService('agenda', '/favorites')">Ver favoritos</button></article>
+          <article class="panel-card admin-only"><div class="head"><span class="ico">🧩</span><span>Gestionar sesiones</span></div><p>Crea y edita sesiones, asigna salas y ponentes.</p><button class="cta" onclick="openService('agenda')">Administrar agenda</button></article>
+        </div>
+      </section>
+
+      <section id="panel-notificaciones" class="panel">
+        <div class="hero"><h2>Notificaciones</h2><p>Comunicacion centralizada para usuarios y asistentes.</p></div>
+        <div class="grid-cards">
+          <article class="panel-card"><div class="head"><span class="ico">📩</span><span>Bandeja</span></div><p>Visualiza mensajes pendientes y recientes.</p><button class="cta" onclick="openService('notification')">Abrir notification-service</button></article>
+          <article class="panel-card admin-only"><div class="head"><span class="ico">📣</span><span>Difusion masiva</span></div><p>Envia avisos globales a todos los usuarios.</p><button class="cta" onclick="openService('notification')">Crear aviso</button></article>
+          <article class="panel-card"><div class="head"><span class="ico">⚙️</span><span>Preferencias</span></div><p>Configura tipos de alertas y recordatorios.</p><button class="cta" onclick="openService('mobile')">Configurar</button></article>
+        </div>
+      </section>
+
+      <section id="panel-analytica" class="panel">
+        <div class="hero"><h2>Analitica y Reportes</h2><p>Metricas de ventas, asistencia y perfil demografico en tiempo real.</p></div>
+        <div class="grid-cards admin-only">
+          <article class="panel-card"><div class="head"><span class="ico">💰</span><span>Ventas en tiempo real</span></div><p>Ingresos totales, volumen de entradas y tasa de conversion por evento.</p><button class="cta" onclick="openService('analytics', '/sales')">Ver ventas</button></article>
+          <article class="panel-card"><div class="head"><span class="ico">👥</span><span>Aforo y asistencia</span></div><p>Check-ins en vivo y ocupacion por sesion o sala.</p><button class="cta" onclick="openService('analytics', '/attendance')">Ver asistencia</button></article>
+          <article class="panel-card"><div class="head"><span class="ico">📊</span><span>Perfil demografico</span></div><p>Ubicacion, tipo de entrada y segmentacion de asistentes del evento.</p><button class="cta" onclick="openService('analytics', '/summary')">Ver reportes</button></article>
+        </div>
+      </section>
+
+      <section id="panel-admin" class="panel">
+        <div class="hero"><h2>Panel Administrativo</h2><p>Solo administradores: operacion integral de microservicios.</p></div>
+        <div class="grid-cards admin-only">
+          <article class="panel-card"><div class="head"><span class="ico">👥</span><span>Usuarios</span></div><p>Alta, baja y modificacion de cuentas.</p><button class="cta" onclick="openService('user', '/data')">Abrir user-service</button></article>
+          <article class="panel-card"><div class="head"><span class="ico">🧩</span><span>Gateway</span></div><p>Orquestacion de servicios y dashboard consolidado.</p><button class="cta" onclick="openService('gateway')">Abrir api-gateway</button></article>
+          <article class="panel-card"><div class="head"><span class="ico">📉</span><span>Metricas</span></div><p>Estado de negocio y rendimiento del sistema.</p><button class="cta" onclick="openService('analytics', '/summary')">Abrir analytics-service</button></article>
+        </div>
+        <div class="muted-box admin-only">Tip: este panel puede conectarse luego con endpoints protegidos por rol para acciones reales.</div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<p class="page-tagline">EventHive · Plataforma integral de gestion de eventos</p>
+
 </body>
 </html>

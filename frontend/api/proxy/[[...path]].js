@@ -107,7 +107,7 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const targetUrl = buildTargetUrl(baseUrl, restPath, req.query);
+  const targetUrl = buildTargetUrl(baseUrl, [serviceKey, ...restPath], req.query);
   const requestInit = {
     method: req.method,
     headers: extractHeaders(req.headers),

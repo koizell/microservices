@@ -230,7 +230,7 @@ export class UserService {
 	}
 
 	private buildConfirmationUrl(token: string) {
-		const baseUrl = normalizePublicBaseUrl(process.env.APP_BASE_URL, 'http://localhost:3000');
+		const baseUrl = normalizePublicBaseUrl(process.env.APP_BASE_URL, 'http://localhost:3009');
 		return `${baseUrl}/users/confirm?token=${token}`;
 	}
 
@@ -258,7 +258,7 @@ export class UserService {
 	}
 
 	private buildResetUrl(token: string) {
-		const baseUrl = normalizePublicBaseUrl(process.env.APP_BASE_URL, 'http://localhost:3000');
-		return `${baseUrl}/users?resetToken=${token}`;
+		const baseUrl = normalizePublicBaseUrl(process.env.APP_BASE_URL, 'http://localhost:3009');
+		return `${baseUrl}/?resetToken=${encodeURIComponent(token)}`;
 	}
 }
