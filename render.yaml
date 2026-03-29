@@ -1,10 +1,3 @@
-databases:
-  - name: eventhive-postgres
-    region: oregon
-    postgresMajorVersion: "16"
-    databaseName: eventhive
-    user: eventhive
-
 envVarGroups:
   - name: eventhive-shared
     envVars:
@@ -32,9 +25,7 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
-        fromDatabase:
-          name: eventhive-postgres
-          property: connectionString
+        sync: false
       - key: NOTIFICATION_SERVICE_URL
         fromService:
           name: eventhive-notification-service
@@ -55,9 +46,7 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
-        fromDatabase:
-          name: eventhive-postgres
-          property: connectionString
+        sync: false
 
   - type: web
     runtime: node
@@ -71,9 +60,7 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
-        fromDatabase:
-          name: eventhive-postgres
-          property: connectionString
+        sync: false
       - key: EVENT_SERVICE_URL
         fromService:
           name: eventhive-event-service
@@ -102,9 +89,7 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
-        fromDatabase:
-          name: eventhive-postgres
-          property: connectionString
+        sync: false
       - key: TICKETING_SERVICE_URL
         fromService:
           name: eventhive-ticketing-service
@@ -135,9 +120,7 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
-        fromDatabase:
-          name: eventhive-postgres
-          property: connectionString
+        sync: false
 
   - type: web
     runtime: node
@@ -151,9 +134,7 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
-        fromDatabase:
-          name: eventhive-postgres
-          property: connectionString
+        sync: false
 
   - type: web
     runtime: node
@@ -167,9 +148,7 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
-        fromDatabase:
-          name: eventhive-postgres
-          property: connectionString
+        sync: false
 
   - type: web
     runtime: node
