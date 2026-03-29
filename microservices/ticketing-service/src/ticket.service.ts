@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Order } from './order.entity';
@@ -41,8 +41,37 @@ type TicketAudienceRow = {
   lastPurchaseAt: string | null;
 };
 
+const TICKETING_TABLE_COLUMNS = {
+  tickets: [
+    { legacyName: 'createdAt', columnName: 'created_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+  ],
+  orders: [
+    { legacyName: 'userId', columnName: 'user_id', definition: 'VARCHAR(120) NOT NULL DEFAULT \'\'' },
+    { legacyName: 'ticketId', columnName: 'ticket_id', definition: 'UUID NULL' },
+    { legacyName: 'ticketTypeId', columnName: 'ticket_type_id', definition: 'VARCHAR(120) NULL' },
+    { legacyName: 'ticketTypeName', columnName: 'ticket_type_name', definition: 'VARCHAR(200) NULL' },
+    { legacyName: null, columnName: 'quantity', definition: 'INT NOT NULL DEFAULT 1' },
+    { legacyName: 'unitPrice', columnName: 'unit_price', definition: 'NUMERIC(14,2) NOT NULL DEFAULT 0' },
+    { legacyName: 'totalAmount', columnName: 'total_amount', definition: 'NUMERIC(14,2) NOT NULL DEFAULT 0' },
+    { legacyName: 'paymentIntentId', columnName: 'payment_intent_id', definition: 'VARCHAR(160) NOT NULL DEFAULT \'manual\'' },
+    { legacyName: 'recipientEmail', columnName: 'recipient_email', definition: 'VARCHAR(255) NOT NULL DEFAULT \'attendee@example.com\'' },
+    { legacyName: 'createdAt', columnName: 'created_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+  ],
+  ticket_types: [
+    { legacyName: 'quantitySold', columnName: 'quantity_sold', definition: 'INT NOT NULL DEFAULT 0' },
+    { legacyName: 'maxPerPerson', columnName: 'max_per_person', definition: 'INT NOT NULL DEFAULT 0' },
+    { legacyName: 'eventId', columnName: 'event_id', definition: 'VARCHAR(120) NULL' },
+    { legacyName: 'isActive', columnName: 'is_active', definition: 'BOOLEAN NOT NULL DEFAULT TRUE' },
+    { legacyName: 'archivedAt', columnName: 'archived_at', definition: 'TIMESTAMP NULL' },
+    { legacyName: 'createdAt', columnName: 'created_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+    { legacyName: 'updatedAt', columnName: 'updated_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+  ],
+} as const;
+
 @Injectable()
-export class TicketService {
+export class TicketService implements OnModuleInit {
+  private readonly logger = new Logger(TicketService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Ticket)
@@ -54,6 +83,147 @@ export class TicketService {
     private readonly paymentService: PaymentService,
     private readonly rabbitMqService: RabbitMqService,
   ) {}
+
+  async onModuleInit() {
+    await this.ensureTicketingSchema();
+  }
+
+  private async ensureTicketingSchema() {
+    await this.dataSource.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS tickets (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title VARCHAR(200) NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status VARCHAR(40) NOT NULL DEFAULT 'paid',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR(120) NOT NULL,
+        ticket_id UUID NULL,
+        ticket_type_id VARCHAR(120) NULL,
+        ticket_type_name VARCHAR(200) NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+        total_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+        provider VARCHAR(40) NOT NULL DEFAULT 'manual',
+        payment_intent_id VARCHAR(160) NOT NULL DEFAULT 'manual',
+        status VARCHAR(40) NOT NULL DEFAULT 'paid',
+        recipient_email VARCHAR(255) NOT NULL DEFAULT 'attendee@example.com',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS ticket_types (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(200) NOT NULL,
+        price NUMERIC(14,2) NOT NULL,
+        quantity INT NOT NULL DEFAULT 0,
+        quantity_sold INT NOT NULL DEFAULT 0,
+        max_per_person INT NOT NULL DEFAULT 0,
+        event_id VARCHAR(120) NULL,
+        category VARCHAR(120) NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        archived_at TIMESTAMP NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    for (const [tableName, columns] of Object.entries(TICKETING_TABLE_COLUMNS)) {
+      for (const column of columns) {
+        if (column.legacyName) {
+          await this.renameLegacyColumnIfNeeded(tableName, column.legacyName, column.columnName);
+        }
+        await this.dataSource.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS ${column.columnName} ${column.definition}`);
+      }
+    }
+
+    await this.dataSource.query(`
+      UPDATE tickets
+      SET
+        description = COALESCE(description, ''),
+        status = COALESCE(NULLIF(status, ''), 'paid'),
+        created_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+      WHERE description IS NULL
+        OR status IS NULL
+        OR status = ''
+        OR created_at IS NULL
+    `);
+
+    await this.dataSource.query(`
+      UPDATE orders
+      SET
+        quantity = COALESCE(quantity, 1),
+        unit_price = COALESCE(unit_price, total_amount, 0),
+        total_amount = COALESCE(total_amount, unit_price, 0),
+        provider = COALESCE(NULLIF(provider, ''), 'manual'),
+        payment_intent_id = COALESCE(NULLIF(payment_intent_id, ''), 'manual'),
+        status = COALESCE(NULLIF(status, ''), 'paid'),
+        recipient_email = COALESCE(NULLIF(recipient_email, ''), 'attendee@example.com'),
+        created_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+      WHERE quantity IS NULL
+        OR unit_price IS NULL
+        OR total_amount IS NULL
+        OR provider IS NULL
+        OR provider = ''
+        OR payment_intent_id IS NULL
+        OR payment_intent_id = ''
+        OR status IS NULL
+        OR status = ''
+        OR recipient_email IS NULL
+        OR recipient_email = ''
+        OR created_at IS NULL
+    `);
+
+    await this.dataSource.query(`
+      UPDATE ticket_types
+      SET
+        quantity_sold = COALESCE(quantity_sold, 0),
+        max_per_person = COALESCE(max_per_person, 0),
+        is_active = COALESCE(is_active, TRUE),
+        created_at = COALESCE(created_at, CURRENT_TIMESTAMP),
+        updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
+      WHERE quantity_sold IS NULL
+        OR max_per_person IS NULL
+        OR is_active IS NULL
+        OR created_at IS NULL
+        OR updated_at IS NULL
+    `);
+
+    this.logger.log('Verified ticketing tables schema');
+  }
+
+  private async renameLegacyColumnIfNeeded(tableName: string, legacyName: string, columnName: string) {
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = '${tableName}'
+            AND column_name = '${legacyName}'
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = '${tableName}'
+            AND column_name = '${columnName}'
+        ) THEN
+          EXECUTE 'ALTER TABLE ${tableName} RENAME COLUMN "${legacyName}" TO ${columnName}';
+        END IF;
+      END
+      $$;
+    `);
+  }
 
   private getEventServiceBaseUrl() {
     return normalizeServiceBaseUrl(process.env.EVENT_SERVICE_URL, 'http://localhost:3001');
@@ -511,20 +681,20 @@ export class TicketService {
       `
         SELECT
           MIN(u.id::text) AS "userId",
-          COALESCE(NULLIF(TRIM(MIN(u.name)), ''), SPLIT_PART(LOWER(TRIM(o."recipientEmail")), '@', 1), 'comprador') AS name,
-          LOWER(TRIM(o."recipientEmail")) AS email,
-          LOWER(COALESCE(MIN(u."accountType"), 'guest')) AS "accountType",
+          COALESCE(NULLIF(TRIM(MIN(u.name)), ''), SPLIT_PART(LOWER(TRIM(o.recipient_email)), '@', 1), 'comprador') AS name,
+          LOWER(TRIM(o.recipient_email)) AS email,
+          LOWER(COALESCE(MIN(u.account_type), 'guest')) AS "accountType",
           COUNT(*)::int AS "totalOrders",
           COALESCE(SUM(o.quantity), 0)::int AS "totalTickets",
-          MAX(o."createdAt")::text AS "lastPurchaseAt"
+          MAX(o.created_at)::text AS "lastPurchaseAt"
         FROM orders o
-        LEFT JOIN users u ON u.id::text = o."userId"
-        WHERE o."ticketTypeId" = $1
-          AND TRIM(COALESCE(o."recipientEmail", '')) <> ''
-          AND LOWER(COALESCE(u."accountType", 'guest')) IN (${allowedRolesSql})
+        LEFT JOIN users u ON u.id::text = o.user_id
+        WHERE o.ticket_type_id = $1
+          AND TRIM(COALESCE(o.recipient_email, '')) <> ''
+          AND LOWER(COALESCE(u.account_type, 'guest')) IN (${allowedRolesSql})
           AND LOWER(COALESCE(o.status, 'paid')) IN ('paid', 'succeeded', 'approved')
-        GROUP BY LOWER(TRIM(o."recipientEmail"))
-        ORDER BY MAX(o."createdAt") DESC, LOWER(TRIM(o."recipientEmail")) ASC
+        GROUP BY LOWER(TRIM(o.recipient_email))
+        ORDER BY MAX(o.created_at) DESC, LOWER(TRIM(o.recipient_email)) ASC
       `,
       [normalizedId],
     )) as TicketAudienceRow[];
@@ -695,7 +865,7 @@ export class TicketService {
         await this.ticketTypeRepository
           .createQueryBuilder()
           .update(TicketType)
-          .set({ quantitySold: () => `GREATEST(0, \"quantitySold\" - ${quantity})` })
+          .set({ quantitySold: () => `GREATEST(0, quantity_sold - ${quantity})` })
           .where('id = :id', { id: ticketType.id })
           .execute();
 

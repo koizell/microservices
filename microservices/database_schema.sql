@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS tickets (
   status VARCHAR(40) NOT NULL
 );
 
+ALTER TABLE tickets
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+UPDATE tickets
+SET
+  description = COALESCE(description, ''),
+  status = COALESCE(NULLIF(status, ''), 'paid'),
+  created_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+WHERE description IS NULL
+  OR status IS NULL
+  OR status = ''
+  OR created_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS orders (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id VARCHAR(120) NOT NULL,
@@ -79,6 +92,64 @@ CREATE TABLE IF NOT EXISTS orders (
   status VARCHAR(40) NOT NULL DEFAULT 'paid',
   recipient_email VARCHAR(255) NOT NULL DEFAULT 'attendee@example.com'
 );
+
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS ticket_type_id VARCHAR(120) NULL,
+  ADD COLUMN IF NOT EXISTS ticket_type_name VARCHAR(200) NULL,
+  ADD COLUMN IF NOT EXISTS quantity INT NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+UPDATE orders
+SET
+  quantity = COALESCE(quantity, 1),
+  unit_price = COALESCE(unit_price, total_amount, 0),
+  total_amount = COALESCE(total_amount, unit_price, 0),
+  provider = COALESCE(NULLIF(provider, ''), 'manual'),
+  payment_intent_id = COALESCE(NULLIF(payment_intent_id, ''), 'manual'),
+  status = COALESCE(NULLIF(status, ''), 'paid'),
+  recipient_email = COALESCE(NULLIF(recipient_email, ''), 'attendee@example.com'),
+  created_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+WHERE quantity IS NULL
+  OR unit_price IS NULL
+  OR total_amount IS NULL
+  OR provider IS NULL
+  OR provider = ''
+  OR payment_intent_id IS NULL
+  OR payment_intent_id = ''
+  OR status IS NULL
+  OR status = ''
+  OR recipient_email IS NULL
+  OR recipient_email = ''
+  OR created_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS ticket_types (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(200) NOT NULL,
+  price NUMERIC(14,2) NOT NULL,
+  quantity INT NOT NULL DEFAULT 0,
+  quantity_sold INT NOT NULL DEFAULT 0,
+  max_per_person INT NOT NULL DEFAULT 0,
+  event_id VARCHAR(120) NULL,
+  category VARCHAR(120) NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  archived_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+UPDATE ticket_types
+SET
+  quantity_sold = COALESCE(quantity_sold, 0),
+  max_per_person = COALESCE(max_per_person, 0),
+  is_active = COALESCE(is_active, TRUE),
+  created_at = COALESCE(created_at, CURRENT_TIMESTAMP),
+  updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)
+WHERE quantity_sold IS NULL
+  OR max_per_person IS NULL
+  OR is_active IS NULL
+  OR created_at IS NULL
+  OR updated_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

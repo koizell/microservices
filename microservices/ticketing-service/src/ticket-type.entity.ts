@@ -5,36 +5,36 @@ export class TicketType {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'name' })
   name: string;
 
-  @Column({ type: 'numeric' })
+  @Column({ name: 'price', type: 'numeric' })
   price: number;
 
-  @Column({ default: 0 })
+  @Column({ name: 'quantity', default: 0 })
   quantity: number;
 
-  @Column({ default: 0 })
+  @Column({ name: 'quantity_sold', default: 0 })
   quantitySold: number;
 
-  @Column({ default: 0 })
+  @Column({ name: 'max_per_person', default: 0 })
   maxPerPerson: number;
 
-  @Column({ nullable: true })
+  @Column({ name: 'event_id', nullable: true })
   eventId?: string;
 
-  @Column({ nullable: true })
+  @Column({ name: 'category', nullable: true })
   category?: string;
 
-  @Column({ default: true })
+  @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'archived_at', type: 'timestamp', nullable: true })
   archivedAt?: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
   updatedAt: Date;
 }

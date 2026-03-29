@@ -5,15 +5,15 @@ export class Ticket {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'title' })
   title: string;
 
-  @Column()
+  @Column({ name: 'description', type: 'text' })
   description: string;
 
-  @Column()
+  @Column({ name: 'status' })
   status: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 }

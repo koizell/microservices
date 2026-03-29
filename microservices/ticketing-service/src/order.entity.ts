@@ -5,39 +5,39 @@ export class Order {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'user_id' })
   userId: string;
 
-  @Column()
+  @Column({ name: 'ticket_id' })
   ticketId: string;
 
-  @Column({ nullable: true })
+  @Column({ name: 'ticket_type_id', nullable: true })
   ticketTypeId?: string;
 
-  @Column({ nullable: true })
+  @Column({ name: 'ticket_type_name', nullable: true })
   ticketTypeName?: string;
 
-  @Column({ default: 1 })
+  @Column({ name: 'quantity', default: 1 })
   quantity: number;
 
-  @Column({ type: 'numeric', default: 0 })
+  @Column({ name: 'unit_price', type: 'numeric', default: 0 })
   unitPrice: number;
 
-  @Column({ type: 'numeric' })
+  @Column({ name: 'total_amount', type: 'numeric' })
   totalAmount: number;
 
-  @Column()
+  @Column({ name: 'provider' })
   provider: string;
 
-  @Column()
+  @Column({ name: 'payment_intent_id' })
   paymentIntentId: string;
 
-  @Column({ default: 'paid' })
+  @Column({ name: 'status', default: 'paid' })
   status: string;
 
-  @Column({ default: 'attendee@example.com' })
+  @Column({ name: 'recipient_email', default: 'attendee@example.com' })
   recipientEmail: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 }
