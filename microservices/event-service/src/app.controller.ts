@@ -140,6 +140,9 @@ export class AppController {
       ['monday','Lunes'],['tuesday','Martes'],['wednesday','Miercoles'],['thursday','Jueves'],['friday','Viernes'],['saturday','Sabado'],['sunday','Domingo']
     ];
     let map, marker, mapMode = 'none', selectedLocation = null, eventsCache = [];
+    let summaryCache = {};
+    let pendingListHint = '';
+    let listHintActive = false;
     let expandedEvents = new Set();
     const defaultCenter = { lat: 19.4326, lng: -99.1332 };
 
@@ -147,6 +150,19 @@ export class AppController {
       const el = document.getElementById(id);
       el.className = message ? ('msg show ' + type) : 'msg';
       el.textContent = message || '';
+    }
+
+    function showListHint(message) {
+      listHintActive = true;
+      setMsg('listMsg', message, 'info');
+    }
+
+    function clearListHint() {
+      if (!listHintActive) {
+        return;
+      }
+      listHintActive = false;
+      setMsg('listMsg', '', 'info');
     }
 
     function updateLabel() {
@@ -405,10 +421,25 @@ export class AppController {
 
     function renderEventList() {
       const list = document.getElementById('list');
+      const includeArchived = document.getElementById('showArchived').checked;
+      const hasHiddenFinishedEvents = !includeArchived && (Number(summaryCache.finished || 0) > 0 || Number(summaryCache.archived || 0) > 0);
       list.innerHTML = '';
       if (!eventsCache.length) {
+        if (hasHiddenFinishedEvents) {
+          showListHint('No hay eventos visibles con el filtro actual. Activa Mostrar archivados/finalizados para ver los eventos ya finalizados.');
+          list.innerHTML = '<div class="small">No hay eventos activos para este filtro. Activa Mostrar archivados/finalizados para ver los eventos finalizados.</div>';
+          return;
+        }
+        clearListHint();
         list.innerHTML = '<div class="small">No hay eventos registrados para este filtro.</div>';
         return;
+      }
+
+      if (pendingListHint) {
+        showListHint(pendingListHint);
+        pendingListHint = '';
+      } else {
+        clearListHint();
       }
 
       eventsCache.forEach(function(event) {
@@ -460,9 +491,11 @@ export class AppController {
           const response = await fetch(api + '/' + event.id, { method: 'DELETE' });
           const payload = await response.json().catch(function(){ return {}; });
           if (!response.ok) {
+            listHintActive = false;
             setMsg('listMsg', payload.message || 'No se pudo eliminar el evento', 'err');
             return;
           }
+          listHintActive = false;
           setMsg('listMsg', 'Evento eliminado.', 'ok');
           if (document.getElementById('editingId').value === event.id) {
             resetForm();
@@ -489,10 +522,11 @@ export class AppController {
       const eventsData = await eventsResponse.json().catch(function(){ return []; });
       const summaryData = await summaryResponse.json().catch(function(){ return {}; });
       eventsCache = Array.isArray(eventsData) ? eventsData : [];
+      summaryCache = summaryData && typeof summaryData === 'object' ? summaryData : {};
       expandedEvents = new Set(Array.from(expandedEvents).filter(function(id) {
         return eventsCache.some(function(event) { return event.id === id; });
       }));
-      renderSummary(summaryData || {});
+      renderSummary(summaryCache);
       renderEventList();
     }
 
@@ -526,6 +560,11 @@ export class AppController {
         return;
       }
       setMsg('formMsg', editingId ? 'Evento actualizado.' : 'Evento creado.', 'ok');
+      pendingListHint = '';
+      if (payload.status === 'finished' || payload.isArchived) {
+        document.getElementById('showArchived').checked = true;
+        pendingListHint = 'Se activo Mostrar archivados/finalizados porque, con la fecha u hora elegida, este evento ya aparece como finalizado.';
+      }
       resetForm();
       await load();
     }
