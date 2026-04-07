@@ -2,6 +2,7 @@
 import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
 import { GatewayController } from './gateway.controller';
+import { GatewayProxyService } from './gateway-proxy.service';
 import { RoleGuard } from './guards/role.guard';
 
 @Module({
@@ -13,6 +14,7 @@ import { RoleGuard } from './guards/role.guard';
   ],
   controllers: [GatewayController],
   providers: [
+    GatewayProxyService,
     {
       provide: APP_GUARD,
       useClass: RoleGuard,

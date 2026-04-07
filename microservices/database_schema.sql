@@ -194,3 +194,13 @@ CREATE TABLE IF NOT EXISTS daily_sales (
   total_revenue NUMERIC(14,2) NOT NULL DEFAULT 0,
   total_tickets INT NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS daily_sales_tickets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  day DATE NOT NULL,
+  ticket_type_id VARCHAR(120) NOT NULL,
+  ticket_type_name VARCHAR(200) NULL,
+  total_revenue NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_tickets INT NOT NULL DEFAULT 0,
+  UNIQUE (day, ticket_type_id)
+);

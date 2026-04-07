@@ -19,6 +19,15 @@ function normalizeServiceBaseUrl(value: string | undefined, fallback: string) {
   return /^https?:\/\//i.test(candidate) ? candidate : `http://${candidate}`;
 }
 
+function buildInternalServiceHeaders(headers: Record<string, string> = {}) {
+  const normalized = { ...headers, 'x-forwarded-by': 'ticketing-service' };
+  const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
+  if (internalApiKey) {
+    normalized['x-internal-api-key'] = internalApiKey;
+  }
+  return normalized;
+}
+
 type PurchaseInput = {
   userId: string;
   ticketTypeId?: string;
@@ -61,6 +70,9 @@ const TICKETING_TABLE_COLUMNS = {
     { legacyName: 'quantitySold', columnName: 'quantity_sold', definition: 'INT NOT NULL DEFAULT 0' },
     { legacyName: 'maxPerPerson', columnName: 'max_per_person', definition: 'INT NOT NULL DEFAULT 0' },
     { legacyName: 'eventId', columnName: 'event_id', definition: 'VARCHAR(120) NULL' },
+    { legacyName: null, columnName: 'organizer_id', definition: 'VARCHAR(120) NULL' },
+    { legacyName: null, columnName: 'organizer_name', definition: 'VARCHAR(200) NULL' },
+    { legacyName: null, columnName: 'organizer_email', definition: 'VARCHAR(255) NULL' },
     { legacyName: 'isActive', columnName: 'is_active', definition: 'BOOLEAN NOT NULL DEFAULT TRUE' },
     { legacyName: 'archivedAt', columnName: 'archived_at', definition: 'TIMESTAMP NULL' },
     { legacyName: 'createdAt', columnName: 'created_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
@@ -238,7 +250,9 @@ export class TicketService implements OnModuleInit {
     }
 
     try {
-      const response = await fetch(`${this.getEventServiceBaseUrl()}/events/data/${eventId}`);
+      const response = await fetch(`${this.getEventServiceBaseUrl()}/events/data/${eventId}`, {
+        headers: buildInternalServiceHeaders(),
+      });
       if (!response.ok) {
         cache?.set(eventId, null);
         return null;
@@ -303,9 +317,9 @@ export class TicketService implements OnModuleInit {
     try {
       const response = await fetch(`${baseUrl}/credentials/events/ticket-purchased`, {
         method: 'POST',
-        headers: {
+        headers: buildInternalServiceHeaders({
           'Content-Type': 'application/json',
-        },
+        }),
         body: JSON.stringify(event),
       });
 
@@ -345,9 +359,9 @@ export class TicketService implements OnModuleInit {
     try {
       const response = await fetch(`${baseUrl}/notifications/events/ticket-purchased`, {
         method: 'POST',
-        headers: {
+        headers: buildInternalServiceHeaders({
           'Content-Type': 'application/json',
-        },
+        }),
         body: JSON.stringify(event),
       });
 
@@ -406,10 +420,22 @@ export class TicketService implements OnModuleInit {
     return existing;
   }
 
-  async getTicketTypes(eventId?: string, includeInactive = false): Promise<TicketType[]> {
+  async getTicketTypes(
+    eventId?: string,
+    includeInactive = false,
+    organizer?: { id?: string; email?: string },
+  ): Promise<TicketType[]> {
     const query = this.ticketTypeRepository.createQueryBuilder('tt');
     if (eventId) {
       query.where('tt.eventId = :eventId', { eventId });
+    }
+    if (organizer?.id) {
+      query.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
+    }
+    if (organizer?.email) {
+      query.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
+        organizerEmail: organizer.email.toLowerCase(),
+      });
     }
     if (!includeInactive) {
       query.andWhere('tt.isActive = :isActive', { isActive: true });
@@ -417,6 +443,28 @@ export class TicketService implements OnModuleInit {
     let ticketTypes = await query.orderBy('tt.createdAt', 'DESC').getMany();
     const changed = await this.syncTicketTypeArchiveState(ticketTypes);
     if (!changed) {
+      if (organizer && !ticketTypes.length) {
+        const backfilled = await this.backfillOrganizerForUnassignedTypes(organizer);
+        if (backfilled) {
+          const refreshedQuery = this.ticketTypeRepository.createQueryBuilder('tt');
+          if (eventId) {
+            refreshedQuery.where('tt.eventId = :eventId', { eventId });
+          }
+          if (organizer?.id) {
+            refreshedQuery.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
+          }
+          if (organizer?.email) {
+            refreshedQuery.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
+              organizerEmail: organizer.email.toLowerCase(),
+            });
+          }
+          if (!includeInactive) {
+            refreshedQuery.andWhere('tt.isActive = :isActive', { isActive: true });
+          }
+          return await refreshedQuery.orderBy('tt.createdAt', 'DESC').getMany();
+        }
+      }
+
       return ticketTypes;
     }
 
@@ -424,11 +472,67 @@ export class TicketService implements OnModuleInit {
     if (eventId) {
       refreshedQuery.where('tt.eventId = :eventId', { eventId });
     }
+    if (organizer?.id) {
+      refreshedQuery.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
+    }
+    if (organizer?.email) {
+      refreshedQuery.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
+        organizerEmail: organizer.email.toLowerCase(),
+      });
+    }
     if (!includeInactive) {
       refreshedQuery.andWhere('tt.isActive = :isActive', { isActive: true });
     }
     ticketTypes = await refreshedQuery.orderBy('tt.createdAt', 'DESC').getMany();
+
+    if (organizer && !ticketTypes.length) {
+      const backfilled = await this.backfillOrganizerForUnassignedTypes(organizer);
+      if (backfilled) {
+        const retryQuery = this.ticketTypeRepository.createQueryBuilder('tt');
+        if (eventId) {
+          retryQuery.where('tt.eventId = :eventId', { eventId });
+        }
+        if (organizer?.id) {
+          retryQuery.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
+        }
+        if (organizer?.email) {
+          retryQuery.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
+            organizerEmail: organizer.email.toLowerCase(),
+          });
+        }
+        if (!includeInactive) {
+          retryQuery.andWhere('tt.isActive = :isActive', { isActive: true });
+        }
+        return await retryQuery.orderBy('tt.createdAt', 'DESC').getMany();
+      }
+    }
+
     return ticketTypes;
+  }
+
+  private async backfillOrganizerForUnassignedTypes(organizer: { id?: string; email?: string }) {
+    const organizerId = String(organizer?.id || '').trim();
+    const organizerEmail = String(organizer?.email || '').trim().toLowerCase();
+    if (!organizerId && !organizerEmail) {
+      return 0;
+    }
+
+    const updatePayload: Partial<TicketType> = {};
+    if (organizerId) {
+      updatePayload.organizerId = organizerId;
+    }
+    if (organizerEmail) {
+      updatePayload.organizerEmail = organizerEmail;
+    }
+
+    const result = await this.ticketTypeRepository
+      .createQueryBuilder()
+      .update(TicketType)
+      .set(updatePayload)
+      .where('organizer_id IS NULL AND organizer_email IS NULL')
+      .execute();
+
+    return Number(result.affected || 0);
   }
 
   async createTicketType(data: {
@@ -438,6 +542,9 @@ export class TicketService implements OnModuleInit {
     eventId?: string;
     category?: string;
     maxPerPerson?: number;
+    organizerId?: string;
+    organizerName?: string;
+    organizerEmail?: string;
   }): Promise<TicketType> {
     const name = (data.name || '').trim();
     const price = Number(data.price ?? 0);
@@ -456,6 +563,9 @@ export class TicketService implements OnModuleInit {
       throw new BadRequestException('maxPerPerson must be 0 or a positive integer');
     }
 
+    const organizerId = String(data.organizerId || '').trim();
+    const organizerName = String(data.organizerName || '').trim();
+    const organizerEmail = String(data.organizerEmail || '').trim().toLowerCase();
     const ticketType = this.ticketTypeRepository.create(data);
     ticketType.name = name;
     ticketType.price = price;
@@ -464,6 +574,15 @@ export class TicketService implements OnModuleInit {
     ticketType.maxPerPerson = maxPerPerson;
     ticketType.isActive = true;
     ticketType.archivedAt = null;
+    if (organizerId) {
+      ticketType.organizerId = organizerId;
+    }
+    if (organizerName) {
+      ticketType.organizerName = organizerName;
+    }
+    if (organizerEmail) {
+      ticketType.organizerEmail = organizerEmail;
+    }
     return await this.ticketTypeRepository.save(ticketType);
   }
 
@@ -893,9 +1012,13 @@ export class TicketService implements OnModuleInit {
         occurredAt: new Date().toISOString(),
         orderId: savedOrder.id,
         orderItemId: ticket.id,
+        userId,
         ticketTypeId: ticketType.id,
         ticketTypeName: ticketType.name,
-        attendeeName: userId,
+        organizerId: ticketType.organizerId ?? null,
+        organizerName: ticketType.organizerName ?? null,
+        organizerEmail: ticketType.organizerEmail ?? null,
+        attendeeName: savedOrder.recipientEmail || userId,
         amount: totalAmount,
         unitPrice,
         quantity,
@@ -964,8 +1087,12 @@ export class TicketService implements OnModuleInit {
       occurredAt: new Date().toISOString(),
       orderId: savedOrder.id,
       orderItemId: ticket.id,
+      userId,
       ticketTypeId: 'custom',
-      attendeeName: userId,
+      organizerId: null,
+      organizerName: null,
+      organizerEmail: null,
+      attendeeName: savedOrder.recipientEmail || userId,
       amount: totalAmount,
       quantity,
       recipientEmail: savedOrder.recipientEmail,

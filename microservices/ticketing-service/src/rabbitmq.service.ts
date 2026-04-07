@@ -16,10 +16,15 @@ export class RabbitMqService implements OnModuleDestroy {
   private readonly logger = new Logger(RabbitMqService.name);
   private connection?: any;
   private channel?: any;
+  private channelReady?: Promise<any>;
 
   private async ensureChannel() {
     if (this.channel) {
       return this.channel;
+    }
+
+    if (this.channelReady) {
+      return await this.channelReady;
     }
 
     const url = getRabbitMqUrl();
@@ -28,14 +33,22 @@ export class RabbitMqService implements OnModuleDestroy {
       return undefined;
     }
 
-    try {
-      this.connection = await amqp.connect(url);
-      this.channel = await this.connection.createChannel();
-      return this.channel;
-    } catch (error) {
-      this.logger.warn(`RabbitMQ no disponible (${url}): ${(error as Error).message}`);
-      return undefined;
-    }
+    this.channelReady = (async () => {
+      try {
+        this.connection = await amqp.connect(url);
+        this.channel = await this.connection.createChannel();
+        return this.channel;
+      } catch (error) {
+        this.logger.warn(`RabbitMQ no disponible (${url}): ${(error as Error).message}`);
+        return undefined;
+      } finally {
+        if (!this.channel) {
+          this.channelReady = undefined;
+        }
+      }
+    })();
+
+    return await this.channelReady;
   }
 
   async publish(queue: string, payload: unknown): Promise<boolean> {

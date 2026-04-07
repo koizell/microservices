@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { EmailService } from './email.service';
@@ -17,16 +17,40 @@ function normalizeServiceBaseUrl(value: string | undefined, fallback: string) {
   return /^https?:\/\//i.test(candidate) ? candidate : `http://${candidate}`;
 }
 
+function buildInternalServiceHeaders(headers: Record<string, string> = {}) {
+  const normalized: Record<string, string> = {
+    ...headers,
+    'x-forwarded-by': 'notification-service',
+  };
+  const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
+  if (internalApiKey) {
+    normalized['x-internal-api-key'] = internalApiKey;
+  }
+  return normalized;
+}
+
 type OrganizerRecipient = {
   id: string;
   name: string;
   email: string;
 };
 
+type OrganizerFilter = {
+  organizerId?: string;
+  organizerEmail?: string;
+};
+
+type TicketCampaignOptionsFilter = OrganizerFilter & {
+  includeInactive?: boolean;
+};
+
 type TicketCampaignOption = {
   id: string;
   name: string;
   eventId?: string | null;
+  organizerId?: string | null;
+  organizerName?: string | null;
+  organizerEmail?: string | null;
   category?: string | null;
   price: number;
   quantity: number;
@@ -126,9 +150,11 @@ export class NotificationService implements OnModuleInit {
     return await this.emailService.sendPasswordResetEmail(params);
   }
 
-  async getTicketCampaignOptions(): Promise<TicketCampaignOption[]> {
+  async getTicketCampaignOptions(options?: TicketCampaignOptionsFilter): Promise<TicketCampaignOption[]> {
+    const organizerFilter = this.normalizeOrganizerFilter(options);
+    const includeInactive = this.isTruthy(options?.includeInactive);
     try {
-      const fromTicketing = await this.getTicketCampaignOptionsFromTicketingService();
+      const fromTicketing = await this.getTicketCampaignOptionsFromTicketingService(organizerFilter, includeInactive);
       if (fromTicketing.length > 0) {
         return fromTicketing;
       }
@@ -137,12 +163,12 @@ export class NotificationService implements OnModuleInit {
       this.logger.warn(`No se pudo obtener tipos de ticket desde ticketing-service: ${reason}`);
     }
 
-    return await this.getTicketCampaignOptionsFromDatabase();
+    return await this.getTicketCampaignOptionsFromDatabase(organizerFilter, includeInactive);
   }
 
   async getTicketCampaignAudience(
     ticketTypeId: string,
-    options?: { includeAdmin?: boolean },
+    options?: { includeAdmin?: boolean; organizerId?: string; organizerEmail?: string },
   ): Promise<TicketCampaignAudience> {
     const normalizedId = String(ticketTypeId || '').trim();
     if (!normalizedId) {
@@ -150,6 +176,9 @@ export class NotificationService implements OnModuleInit {
     }
 
     const includeAdmin = options?.includeAdmin === true;
+    const organizerFilter = this.normalizeOrganizerFilter(options);
+
+    await this.assertOrganizerAccessToTicketType(normalizedId, organizerFilter);
 
     try {
       return await this.getTicketCampaignAudienceFromTicketingService(normalizedId, includeAdmin);
@@ -158,7 +187,7 @@ export class NotificationService implements OnModuleInit {
       this.logger.warn(`No se pudo obtener audiencia desde ticketing-service: ${reason}`);
     }
 
-    return await this.getTicketCampaignAudienceFromDatabase(normalizedId, includeAdmin);
+    return await this.getTicketCampaignAudienceFromDatabase(normalizedId, includeAdmin, organizerFilter);
   }
 
   async sendTicketCampaign(params: {
@@ -169,6 +198,8 @@ export class NotificationService implements OnModuleInit {
     includeAdmin?: boolean | string;
     simulate?: boolean | string;
     testRecipients?: string[] | string;
+    organizerId?: string;
+    organizerEmail?: string;
   }) {
     const subject = String(params.subject || '').trim();
     const message = String(params.message || '').trim();
@@ -183,7 +214,11 @@ export class NotificationService implements OnModuleInit {
       throw new BadRequestException('Debes escribir un mensaje');
     }
 
-    const audience = await this.getTicketCampaignAudience(params.ticketTypeId, { includeAdmin });
+    const audience = await this.getTicketCampaignAudience(params.ticketTypeId, {
+      includeAdmin,
+      organizerId: params.organizerId,
+      organizerEmail: params.organizerEmail,
+    });
     if (!audience.recipients.length && !testRecipients.length) {
       throw new BadRequestException('No hay compradores elegibles para el ticket seleccionado');
     }
@@ -274,7 +309,12 @@ export class NotificationService implements OnModuleInit {
       result.participantEmailReason = participantMail.reason;
     }
 
-    const organizers = await this.findOrganizerRecipients();
+    const organizers = await this.resolveOrganizerRecipients(normalized);
+    if (!organizers.length) {
+      this.logger.warn('No se encontro organizador para la venta; se omitio la notificacion interna.');
+      return result;
+    }
+
     for (const organizer of organizers) {
       await this.create({
         message: this.buildOrganizerSaleMessage(normalized),
@@ -302,8 +342,19 @@ export class NotificationService implements OnModuleInit {
     return result;
   }
 
-  private async getTicketCampaignOptionsFromTicketingService(): Promise<TicketCampaignOption[]> {
-    const response = await fetch(`${this.getTicketingServiceBaseUrl()}/tickets/types?includeInactive=true`);
+  private async getTicketCampaignOptionsFromTicketingService(
+    organizer?: OrganizerFilter,
+    includeInactive = false,
+  ): Promise<TicketCampaignOption[]> {
+    const url = new URL('/tickets/types', this.getTicketingServiceBaseUrl());
+    url.searchParams.set('includeInactive', includeInactive ? 'true' : 'false');
+    if (organizer?.organizerId) {
+      url.searchParams.set('organizerId', organizer.organizerId);
+    }
+    if (organizer?.organizerEmail) {
+      url.searchParams.set('organizerEmail', organizer.organizerEmail);
+    }
+    const response = await fetch(url.toString(), { headers: buildInternalServiceHeaders() });
     const payload = await response.json().catch(() => []);
     if (!response.ok) {
       throw new Error(`ticketing-service respondio ${response.status}`);
@@ -313,13 +364,45 @@ export class NotificationService implements OnModuleInit {
     return items.map((item) => this.normalizeTicketCampaignOption(item as Record<string, unknown>));
   }
 
-  private async getTicketCampaignOptionsFromDatabase(): Promise<TicketCampaignOption[]> {
+  private async getTicketCampaignOptionsFromDatabase(
+    organizer?: OrganizerFilter,
+    includeInactive = false,
+  ): Promise<TicketCampaignOption[]> {
+    const filters: string[] = [];
+    const params: Array<string> = [];
+
+    if (organizer?.organizerId) {
+      params.push(organizer.organizerId);
+      filters.push(`organizer_id = $${params.length}`);
+    }
+    if (organizer?.organizerEmail) {
+      params.push(organizer.organizerEmail);
+      filters.push(`LOWER(organizer_email) = $${params.length}`);
+    }
+    if (!includeInactive) {
+      filters.push('is_active = TRUE');
+    }
+
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
     const rows = await this.dataSource.query(
       `
-        SELECT id, name, price, quantity, "quantitySold", "eventId", category, "isActive"
+        SELECT
+          id,
+          name,
+          price,
+          quantity,
+          quantity_sold AS "quantitySold",
+          event_id AS "eventId",
+          organizer_id AS "organizerId",
+          organizer_name AS "organizerName",
+          organizer_email AS "organizerEmail",
+          category,
+          is_active AS "isActive"
         FROM ticket_types
-        ORDER BY "createdAt" DESC
+        ${whereClause}
+        ORDER BY created_at DESC
       `,
+      params,
     );
 
     return (rows as Array<Record<string, unknown>>).map((row) => this.normalizeTicketCampaignOption(row));
@@ -330,7 +413,9 @@ export class NotificationService implements OnModuleInit {
     includeAdmin: boolean,
   ): Promise<TicketCampaignAudience> {
     const query = includeAdmin ? '?includeAdmin=true' : '';
-    const response = await fetch(`${this.getTicketingServiceBaseUrl()}/tickets/types/${ticketTypeId}/audience${query}`);
+    const response = await fetch(`${this.getTicketingServiceBaseUrl()}/tickets/types/${ticketTypeId}/audience${query}`, {
+      headers: buildInternalServiceHeaders(),
+    });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error((payload as { message?: string }).message || `ticketing-service respondio ${response.status}`);
@@ -342,14 +427,38 @@ export class NotificationService implements OnModuleInit {
   private async getTicketCampaignAudienceFromDatabase(
     ticketTypeId: string,
     includeAdmin: boolean,
+    organizer?: OrganizerFilter,
   ): Promise<TicketCampaignAudience> {
+    const filters: string[] = ['id = $1'];
+    const params: Array<string> = [ticketTypeId];
+
+    if (organizer?.organizerId) {
+      params.push(organizer.organizerId);
+      filters.push(`organizer_id = $${params.length}`);
+    }
+    if (organizer?.organizerEmail) {
+      params.push(organizer.organizerEmail);
+      filters.push(`LOWER(organizer_email) = $${params.length}`);
+    }
+
     const [ticketTypeRow] = (await this.dataSource.query(
       `
-        SELECT id, name, price, quantity, "quantitySold", "eventId", category, "isActive"
+        SELECT
+          id,
+          name,
+          price,
+          quantity,
+          quantity_sold AS "quantitySold",
+          event_id AS "eventId",
+          organizer_id AS "organizerId",
+          organizer_name AS "organizerName",
+          organizer_email AS "organizerEmail",
+          category,
+          is_active AS "isActive"
         FROM ticket_types
-        WHERE id = $1
+        WHERE ${filters.join(' AND ')}
       `,
-      [ticketTypeId],
+      params,
     )) as Array<Record<string, unknown>>;
 
     if (!ticketTypeRow) {
@@ -364,20 +473,20 @@ export class NotificationService implements OnModuleInit {
       `
         SELECT
           MIN(u.id::text) AS "userId",
-          COALESCE(NULLIF(TRIM(MIN(u.name)), ''), SPLIT_PART(LOWER(TRIM(o."recipientEmail")), '@', 1), 'comprador') AS name,
-          LOWER(TRIM(o."recipientEmail")) AS email,
-          LOWER(COALESCE(MIN(u."accountType"), 'guest')) AS "accountType",
+          COALESCE(NULLIF(TRIM(MIN(u.name)), ''), SPLIT_PART(LOWER(TRIM(o.recipient_email)), '@', 1), 'comprador') AS name,
+          LOWER(TRIM(o.recipient_email)) AS email,
+          LOWER(COALESCE(MIN(u.account_type), 'guest')) AS "accountType",
           COUNT(*)::int AS "totalOrders",
           COALESCE(SUM(o.quantity), 0)::int AS "totalTickets",
-          MAX(o."createdAt")::text AS "lastPurchaseAt"
+          MAX(o.created_at)::text AS "lastPurchaseAt"
         FROM orders o
-        LEFT JOIN users u ON u.id::text = o."userId"
-        WHERE o."ticketTypeId" = $1
-          AND TRIM(COALESCE(o."recipientEmail", '')) <> ''
-          AND LOWER(COALESCE(u."accountType", 'guest')) IN (${allowedRolesSql})
+        LEFT JOIN users u ON u.id::text = o.user_id
+        WHERE o.ticket_type_id = $1
+          AND TRIM(COALESCE(o.recipient_email, '')) <> ''
+          AND LOWER(COALESCE(u.account_type, 'guest')) IN (${allowedRolesSql})
           AND LOWER(COALESCE(o.status, 'paid')) IN ('paid', 'succeeded', 'approved')
-        GROUP BY LOWER(TRIM(o."recipientEmail"))
-        ORDER BY MAX(o."createdAt") DESC, LOWER(TRIM(o."recipientEmail")) ASC
+        GROUP BY LOWER(TRIM(o.recipient_email))
+        ORDER BY MAX(o.created_at) DESC, LOWER(TRIM(o.recipient_email)) ASC
       `,
       [ticketTypeId],
     )) as TicketCampaignAudienceRow[];
@@ -410,6 +519,9 @@ export class NotificationService implements OnModuleInit {
       id: String(raw.id || ''),
       name: String(raw.name || 'Ticket'),
       eventId: raw.eventId ? String(raw.eventId) : null,
+      organizerId: raw.organizerId ? String(raw.organizerId) : null,
+      organizerName: raw.organizerName ? String(raw.organizerName) : null,
+      organizerEmail: raw.organizerEmail ? String(raw.organizerEmail) : null,
       category: raw.category ? String(raw.category) : null,
       price: Number(raw.price || 0),
       quantity: Number(raw.quantity || 0),
@@ -444,10 +556,81 @@ export class NotificationService implements OnModuleInit {
     return {
       orderId: String(payload?.orderId || payload?.id || 'sin-orden'),
       ticketTypeName: String(payload?.ticketTypeName || payload?.title || 'ticket'),
+      organizerId: String(payload?.organizerId || '').trim(),
+      organizerName: String(payload?.organizerName || '').trim(),
+      organizerEmail: String(payload?.organizerEmail || '').trim().toLowerCase(),
       quantity: Math.max(1, Number(payload?.quantity || 1)),
       amount: Number(payload?.amount || payload?.totalAmount || 0),
       recipientEmail: String(payload?.recipientEmail || '').trim().toLowerCase(),
     };
+  }
+
+  private normalizeOrganizerFilter(options?: OrganizerFilter | { organizerId?: string; organizerEmail?: string }) {
+    const organizerId = String(options?.organizerId ?? '').trim();
+    const organizerEmail = this.normalizeRecipientEmail(options?.organizerEmail ?? '');
+    if (!organizerId && !organizerEmail) {
+      return undefined;
+    }
+    return {
+      organizerId: organizerId || undefined,
+      organizerEmail: organizerEmail || undefined,
+    } as OrganizerFilter;
+  }
+
+  private normalizeRecipientEmail(value: string) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  private async assertOrganizerAccessToTicketType(ticketTypeId: string, organizer?: OrganizerFilter) {
+    if (!organizer?.organizerId && !organizer?.organizerEmail) {
+      return;
+    }
+
+    const options = await this.getTicketCampaignOptions(organizer);
+    const allowed = options.some((option) => option.id === ticketTypeId);
+    if (!allowed) {
+      throw new ForbiddenException('No tienes acceso al ticket seleccionado');
+    }
+  }
+
+  private async resolveOrganizerRecipients(payload: {
+    organizerId?: string;
+    organizerName?: string;
+    organizerEmail?: string;
+  }): Promise<OrganizerRecipient[]> {
+    const organizerEmail = this.normalizeRecipientEmail(payload.organizerEmail ?? '');
+    const organizerId = String(payload.organizerId || '').trim();
+
+    if (organizerEmail) {
+      return [{
+        id: organizerId || 'organizer',
+        name: String(payload.organizerName || 'organizador').trim() || 'organizador',
+        email: organizerEmail,
+      }];
+    }
+
+    if (!organizerId) {
+      return [];
+    }
+
+    const rows = (await this.dataSource.query(
+      `
+        SELECT id, name, email
+        FROM users
+        WHERE id = $1
+          AND LOWER(account_type) = $2
+          AND TRIM(COALESCE(email, '')) <> ''
+      `,
+      [organizerId, 'admin'],
+    )) as OrganizerRecipient[];
+
+    return rows
+      .map((row) => ({
+        id: String(row.id || organizerId),
+        name: String(row.name || 'organizador').trim() || 'organizador',
+        email: this.normalizeRecipientEmail(String(row.email || '')),
+      }))
+      .filter((row) => row.email);
   }
 
   private isTruthy(value: unknown) {
@@ -461,7 +644,7 @@ export class NotificationService implements OnModuleInit {
 
     for (const item of rawItems) {
       for (const part of String(item ?? '').split(/[\n,;]+/)) {
-        const email = String(part || '').trim().toLowerCase();
+        const email = this.normalizeRecipientEmail(String(part || ''));
         if (!email || seen.has(email)) {
           continue;
         }
@@ -529,7 +712,7 @@ export class NotificationService implements OnModuleInit {
       `
         SELECT id, name, email
         FROM users
-        WHERE LOWER("accountType") = $1
+        WHERE LOWER(account_type) = $1
           AND TRIM(COALESCE(email, '')) <> ''
         ORDER BY name ASC
       `,
@@ -548,12 +731,18 @@ export class NotificationService implements OnModuleInit {
   }
 
   async create(notification: Partial<Notification>): Promise<Notification> {
-    const newNotification = this.notificationRepository.create(notification);
+    const normalized = { ...notification };
+    if (normalized.recipient) {
+      normalized.recipient = this.normalizeRecipientEmail(String(normalized.recipient));
+    }
+    const newNotification = this.notificationRepository.create(normalized);
     return await this.notificationRepository.save(newNotification);
   }
 
-  async findAll(limit = 50): Promise<Notification[]> {
+  async findAll(limit = 50, recipient?: string): Promise<Notification[]> {
+    const normalizedRecipient = this.normalizeRecipientEmail(recipient ?? '');
     return await this.notificationRepository.find({
+      where: normalizedRecipient ? { recipient: normalizedRecipient } : undefined,
       take: Math.max(1, Math.min(limit, 100)),
       order: { id: 'DESC' },
     });

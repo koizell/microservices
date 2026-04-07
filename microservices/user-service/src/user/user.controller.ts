@@ -1,4 +1,4 @@
-﻿import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query, Res, UnauthorizedException, UsePipes, ValidationPipe, UseGuards } from '@nestjs/common';
+﻿import { Body, Controller, Delete, Get, Header, Param, ParseUUIDPipe, Post, Put, Query, Res, UnauthorizedException, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from './user.service';
 import { CreateUserDto, ForgotPasswordDto, ResetPasswordDto } from './user.dto';
@@ -13,6 +13,11 @@ export class UserController {
 		private readonly userService: UserService,
 		private readonly jwtService: JwtService,
 	) {}
+
+  @Get('health')
+  status() {
+    return { service: 'user-service', status: 'ok' };
+  }
 
 	@Get()
 	@Header('Content-Type', 'text/html; charset=utf-8')
@@ -436,9 +441,9 @@ body::before{
       <section id="panel-credencial" class="panel">
         <div class="hero"><h2>Credenciales Digitales</h2><p>Tus códigos QR de acceso y validación de entrada al evento.</p></div>
         <div class="grid-cards">
-          <article class="panel-card"><div class="head"><span class="ico">🔐</span><span>Mi QR de acceso</span></div><p>Genera o descarga tu credencial digital para ingresar al evento.</p><button class="cta" onclick="openService('credential','/credentials')">Ver credencial</button></article>
+          <article class="panel-card"><div class="head"><span class="ico">🔐</span><span>Mi QR de acceso</span></div><p>Consulta y descarga tu credencial digital generada despues de la compra.</p><button class="cta" onclick="openService('credential','/credentials/client')">Ver credencial</button></article>
           <article class="panel-card standard-only"><div class="head"><span class="ico">📋</span><span>Mis entradas</span></div><p>Revisa todas las entradas vinculadas a tu cuenta.</p><button class="cta" onclick="openService('ticketing','/tickets')">Ver entradas</button></article>
-          <article class="panel-card admin-only"><div class="head"><span class="ico">📷</span><span>Validar en puerta</span></div><p>Escanea y valida credenciales en los puntos de acceso en tiempo real.</p><button class="cta" onclick="openService('credential','/credentials/validate')">Validar acceso</button></article>
+          <article class="panel-card admin-only"><div class="head"><span class="ico">📷</span><span>Validar en puerta</span></div><p>Escanea y valida credenciales en tiempo real desde la vista de staff.</p><button class="cta" onclick="openService('credential','/credentials/staff')">Validar acceso</button></article>
         </div>
       </section>
 
@@ -490,6 +495,11 @@ let _token = '', _refreshToken = '', _user = null;
 let _sessionTimer = null;
 let _refreshInFlight = null;
 const _host = window.location.hostname || 'localhost';
+const _origin = window.location.origin || ('http://' + _host + (window.location.port ? ':' + window.location.port : ''));
+const _isLocalHost = _host === 'localhost' || _host === '127.0.0.1';
+const _gatewayOrigin = _isLocalHost && window.location.port && window.location.port !== '3008'
+  ? ('http://' + _host + ':3008')
+  : _origin;
 const _storageKeys = {
   token: 'eventhive.session.token',
   refreshToken: 'eventhive.session.refreshToken',
@@ -498,16 +508,20 @@ const _storageKeys = {
   lastPanel: 'eventhive.session.lastPanel',
 };
 const _services = {
-  user: 'http://' + _host + ':3000',
-  event: 'http://' + _host + ':3001',
-  ticketing: 'http://' + _host + ':3002',
-  notification: 'http://' + _host + ':3003',
-  credential: 'http://' + _host + ':3004',
-  agenda: 'http://' + _host + ':3005',
-  analytics: 'http://' + _host + ':3006',
-  mobile: 'http://' + _host + ':3007',
-  gateway: 'http://' + _host + ':3008',
+  user: _origin,
+  event: _gatewayOrigin,
+  ticketing: _gatewayOrigin,
+  notification: _gatewayOrigin,
+  credential: _gatewayOrigin,
+  agenda: _gatewayOrigin,
+  analytics: _gatewayOrigin,
+  mobile: _gatewayOrigin,
+  gateway: _gatewayOrigin,
 };
+
+function gatewayUrl(path) {
+  return _gatewayOrigin + path;
+}
 
 function openService(service, path) {
   const base = _services[service];
@@ -1019,7 +1033,7 @@ if (confirmed === '1') {
 async function loadTicketSummary() {
   if (_user.accountType !== 'admin') return;
   try {
-    const r = await fetch('http://' + _host + ':3002/tickets/orders/summary', {
+    const r = await fetch(gatewayUrl('/tickets/orders/summary'), {
       headers: { 'Authorization': 'Bearer ' + _token }
     });
     const data = await r.json();
@@ -1034,7 +1048,7 @@ async function loadTicketSummary() {
 async function loadMyOrders() {
   if (!_user || !_token) return;
   try {
-    const url = 'http://' + _host + ':3002/tickets/orders?userId=' + _user.id + '&limit=20';
+    const url = gatewayUrl('/tickets/orders?userId=' + encodeURIComponent(_user.id) + '&limit=20');
     const r = await fetch(url, {
       headers: { 'Authorization': 'Bearer ' + _token }
     });
@@ -1075,7 +1089,7 @@ function switchToTicketTypesAdmin() {
 
 async function loadTicketTypes() {
   try {
-    const r = await fetch('http://' + _host + ':3002/tickets/types', {
+    const r = await fetch(gatewayUrl('/tickets/types'), {
       headers: { 'Authorization': 'Bearer ' + _token }
     });
     const types = await r.json();
@@ -1105,7 +1119,7 @@ async function createNewTicketType() {
     return;
   }
   try {
-    const r = await fetch('http://' + _host + ':3002/tickets/types', {
+    const r = await fetch(gatewayUrl('/tickets/types'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _token },
       body: JSON.stringify({ name, price, quantity: qty, category: cat })
@@ -1124,7 +1138,7 @@ async function createNewTicketType() {
 async function deleteTicketType(id) {
   if (!confirm('¿Eliminar este tipo de entrada?')) return;
   try {
-    const r = await fetch('http://' + _host + ':3002/tickets/types/' + id, {
+    const r = await fetch(gatewayUrl('/tickets/types/' + encodeURIComponent(id)), {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + _token }
     });
@@ -1182,7 +1196,7 @@ async function deleteTicketType(id) {
 	}
 
 	@Get('data/:id')
-	async findOne(@Param('id') id: string) {
+  async findOne(@Param('id', new ParseUUIDPipe()) id: string) {
     const user = await this.userService.findOne(id);
     return user ? this.toPublicUser(user) : null;
 	}
@@ -1190,12 +1204,12 @@ async function deleteTicketType(id) {
 	@Put('data/:id')
 	@UseGuards(RoleGuard)
 	@Roles('admin')
-	async update(@Param('id') id: string, @Body() user: Partial<CreateUserDto>) {
+  async update(@Param('id', new ParseUUIDPipe()) id: string, @Body() user: Partial<CreateUserDto>) {
 		return await this.userService.update(id, user);
 	}
 
 	@Delete('data/:id')
-	async remove(@Param('id') id: string) {
+  async remove(@Param('id', new ParseUUIDPipe()) id: string) {
 		return await this.userService.remove(id);
 	}
 

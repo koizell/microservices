@@ -1,6 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { randomUUID } from 'crypto';
 import { AppModule } from './app.module';
+import { GatewayProxyService } from './gateway-proxy.service';
+import { GATEWAY_PROXY_PREFIXES } from './gateway.constants';
 import * as prometheus from 'prom-client';
 
 const register = new prometheus.Registry();
@@ -24,6 +26,7 @@ prometheus.collectDefaultMetrics({ register });
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const server = app.getHttpAdapter().getInstance();
+  const gatewayProxyService = app.get(GatewayProxyService);
 
   app.use((req: any, res: any, next: any) => {
     const correlationId = req.headers['x-correlation-id'] ?? randomUUID();
@@ -70,6 +73,14 @@ async function bootstrap() {
   });
 
   app.enableCors();
+
+  server.use(
+    GATEWAY_PROXY_PREFIXES.map((prefix) => `/${prefix}`),
+    async (req: any, res: any) => {
+      await gatewayProxyService.forwardRequest(req, res);
+    },
+  );
+
   await app.listen(process.env.PORT ?? 3008, '0.0.0.0');
 }
 bootstrap();

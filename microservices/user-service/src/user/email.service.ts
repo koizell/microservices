@@ -31,6 +31,15 @@ function buildServiceBaseUrlCandidates(value: string | undefined, fallback: stri
   return [...candidates];
 }
 
+function buildInternalServiceHeaders(headers: Record<string, string> = {}) {
+  const normalized = { ...headers, 'x-forwarded-by': 'user-service' };
+  const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
+  if (internalApiKey) {
+    normalized['x-internal-api-key'] = internalApiKey;
+  }
+  return normalized;
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -62,9 +71,9 @@ export class EmailService {
       try {
         const response = await fetch(baseUrl + path, {
           method: 'POST',
-          headers: {
+          headers: buildInternalServiceHeaders({
             'Content-Type': 'application/json',
-          },
+          }),
           body: JSON.stringify(payload),
         });
 

@@ -51,9 +51,18 @@ export class MobileController {
     };
   }
 
+  private buildInternalHeaders(headers: Record<string, string> = {}) {
+    const normalized = { ...headers, 'x-forwarded-by': 'mobile-api-service' };
+    const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
+    if (internalApiKey) {
+      normalized['x-internal-api-key'] = internalApiKey;
+    }
+    return normalized;
+  }
+
   private async safeFetch<T>(url: string, fallback: T): Promise<T> {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: this.buildInternalHeaders() });
       if (!response.ok) {
         return fallback;
       }

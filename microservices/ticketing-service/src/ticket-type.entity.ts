@@ -23,6 +23,15 @@ export class TicketType {
   @Column({ name: 'event_id', nullable: true })
   eventId?: string;
 
+  @Column({ name: 'organizer_id', nullable: true })
+  organizerId?: string;
+
+  @Column({ name: 'organizer_name', nullable: true })
+  organizerName?: string;
+
+  @Column({ name: 'organizer_email', nullable: true })
+  organizerEmail?: string;
+
   @Column({ name: 'category', nullable: true })
   category?: string;
 

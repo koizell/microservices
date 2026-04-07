@@ -16,6 +16,15 @@ export class AgendaController {
     return { service: 'agenda-service', status: 'ok' };
   }
 
+  @Get('calendar/data')
+  async calendar(
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+    @Query('status') status?: string,
+  ) {
+    return await this.agendaService.getCalendarData({ start, end, status });
+  }
+
   @Post('sessions/data')
   async createSession(
     @Body()

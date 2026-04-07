@@ -1,26 +1,16 @@
-const SERVICE_ENV_MAP = {
-  gateway: 'GATEWAY_RENDER_URL',
-  users: 'USER_SERVICE_RENDER_URL',
-  events: 'EVENT_SERVICE_RENDER_URL',
-  tickets: 'TICKETING_SERVICE_RENDER_URL',
-  notifications: 'NOTIFICATION_SERVICE_RENDER_URL',
-  credentials: 'CREDENTIAL_SERVICE_RENDER_URL',
-  analytics: 'ANALYTICS_SERVICE_RENDER_URL',
-  agenda: 'AGENDA_SERVICE_RENDER_URL',
-  mobile: 'MOBILE_SERVICE_RENDER_URL',
-};
+const SUPPORTED_PUBLIC_PREFIXES = new Set([
+  'gateway',
+  'users',
+  'events',
+  'tickets',
+  'notifications',
+  'credentials',
+  'analytics',
+  'agenda',
+  'mobile',
+]);
 
-const SERVICE_DEFAULT_URLS = {
-  gateway: 'https://eventhive-api-gateway.onrender.com',
-  users: 'https://eventhive-user-service.onrender.com',
-  events: 'https://eventhive-event-service.onrender.com',
-  tickets: 'https://eventhive-ticketing-service.onrender.com',
-  notifications: 'https://eventhive-notification-service.onrender.com',
-  credentials: 'https://eventhive-credential-service.onrender.com',
-  analytics: 'https://eventhive-analytics-service.onrender.com',
-  agenda: 'https://eventhive-agenda-service.onrender.com',
-  mobile: 'https://eventhive-mobile-api-service.onrender.com',
-};
+const GATEWAY_DEFAULT_URL = 'https://eventhive-api-gateway.onrender.com';
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -137,15 +127,14 @@ module.exports = async function handler(req, res) {
   const serviceKey = String(req.query.service || '').trim();
   const restPath = normalizePathSegments(req.query.path);
 
-  if (!serviceKey || !Object.prototype.hasOwnProperty.call(SERVICE_ENV_MAP, serviceKey)) {
+  if (!serviceKey || !SUPPORTED_PUBLIC_PREFIXES.has(serviceKey)) {
     return res.status(404).json({ message: 'Ruta proxy no soportada' });
   }
 
-  const envKey = SERVICE_ENV_MAP[serviceKey];
-  const baseUrl = normalizeBaseUrl(process.env[envKey]) || SERVICE_DEFAULT_URLS[serviceKey];
+  const baseUrl = normalizeBaseUrl(process.env.GATEWAY_RENDER_URL) || GATEWAY_DEFAULT_URL;
   if (!baseUrl) {
     return res.status(500).json({
-      message: `No se encontro URL para el servicio ${serviceKey}`,
+      message: 'No se encontro URL para el API Gateway',
     });
   }
 

@@ -1,14 +1,20 @@
-import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { AppService } from './app.service';
 
 @Controller('events')
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
+  @Get('health')
+  status() {
+    return { service: 'event-service', status: 'ok' };
+  }
+
   @Get()
   @Header('Content-Type', 'text/html; charset=utf-8')
-  renderUi() {
+  renderUi(@Query('mode') mode?: string) {
     const googleMapsKey = process.env.GOOGLE_MAPS_API_KEY ?? '';
+    const isReadOnlyView = ['viewer', 'participant', 'read-only'].includes(String(mode ?? '').trim().toLowerCase());
     return `<!doctype html>
 <html lang="es">
 <head>
@@ -39,18 +45,19 @@ export class AppController {
     .eventList{display:grid;gap:14px;margin-top:12px;padding-bottom:28px}.eventItem{border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden}.eventSummary{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(150px,.8fr) minmax(150px,.8fr) auto;gap:10px;align-items:center;padding:14px}.eventSummaryCell{display:grid;gap:4px}.eventSummaryLabel{font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.eventSummaryValue{font-size:14px;color:#0f172a;line-height:1.35}.eventSummaryValue.title{font-size:18px;font-weight:800}.summaryActions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.eventDetails{display:none;padding:0 14px 14px;border-top:1px solid var(--line)}.eventItem.expanded .eventDetails{display:block}.detailHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;padding-top:12px}.detailStatus{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.meta div{padding:10px;border:1px solid var(--line);border-radius:10px;background:#f8fafc;font-size:13px;color:#334155}
     .pill{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:800;text-transform:uppercase}.pill.upcoming{background:#dbeafe;color:#1d4ed8}.pill.active{background:#dcfce7;color:#166534}.pill.finished{background:#fee2e2;color:#991b1b}.pill.archived{background:#e5e7eb;color:#374151}
     .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:0;justify-content:flex-end}.actions button{min-height:38px;padding:8px 12px}.small{font-size:12px;color:var(--muted)}
+    .read-only .creation-only{display:none}
     @media(max-width:1020px){.grid{grid-template-columns:1fr}.row,.row2,.row4,.weekdays,.meta,.eventSummary{grid-template-columns:1fr}.actions,.summaryActions{justify-content:flex-start}}
   </style>
 </head>
-<body>
+<body class="${isReadOnlyView ? 'read-only' : ''}">
   <div class="wrap">
     <div class="grid">
       <div class="stack">
-        <section class="card">
+        <section class="card creation-only">
           <div class="toolbar">
             <div>
               <h2 id="formTitle" style="margin:0">Crear evento</h2>
-              <p class="help">Un admin puede definir varios dias, horarios y una descripcion mas completa del evento.</p>
+              <p class="help">Un organizador puede definir varios dias, horarios y una descripcion mas completa del evento.</p>
             </div>
             <div class="actions">
               <button id="saveBtn" type="button">Crear evento</button>
@@ -107,7 +114,7 @@ export class AppController {
       </div>
 
       <div class="stack">
-        <section class="card">
+        <section class="card creation-only">
           <h3 style="margin:0 0 8px">Ubicacion y mapa</h3>
           <div class="searchRow">
             <input id="searchLocation" placeholder="Buscar direccion o lugar">
@@ -136,6 +143,7 @@ export class AppController {
     const api = '/events/data';
     const summaryApi = '/events/summary';
     const GOOGLE_MAPS_KEY = '${googleMapsKey}';
+    const isReadOnlyView = ${isReadOnlyView ? 'true' : 'false'};
     const WEEKDAYS = [
       ['monday','Lunes'],['tuesday','Martes'],['wednesday','Miercoles'],['thursday','Jueves'],['friday','Viernes'],['saturday','Sabado'],['sunday','Domingo']
     ];
@@ -323,7 +331,43 @@ export class AppController {
       return label;
     }
 
+    function syncDateRangeConstraints(forceAlign) {
+      const startInput = document.getElementById('startDate');
+      const endInput = document.getElementById('endDate');
+      const startValue = startInput.value;
+      const endValue = endInput.value;
+
+      endInput.min = startValue || '';
+      if (!startValue) {
+        return false;
+      }
+
+      if (forceAlign || !endValue || endValue < startValue) {
+        endInput.value = startValue;
+        return Boolean(endValue) && endValue < startValue;
+      }
+
+      return false;
+    }
+
+    function translateEventFormError(message) {
+      const normalized = String(message || '').trim();
+      if (!normalized) {
+        return 'No se pudo guardar el evento';
+      }
+
+      const translations = {
+        'endDate cannot be earlier than startDate': 'La fecha de finalizacion no puede ser anterior a la fecha de inicio.',
+        'endTime must be later than startTime for single-day events': 'Para eventos del mismo dia, la hora de finalizacion debe ser posterior a la hora de inicio.',
+      };
+
+      return translations[normalized] || normalized;
+    }
+
     function resetForm() {
+      if (isReadOnlyView) {
+        return;
+      }
       document.getElementById('editingId').value = '';
       document.getElementById('formTitle').textContent = 'Crear evento';
       document.getElementById('saveBtn').textContent = 'Crear evento';
@@ -340,6 +384,7 @@ export class AppController {
       if (marker && mapMode === 'google') { marker.setMap(null); marker = null; }
       if (marker && mapMode === 'leaflet') { map.removeLayer(marker); marker = null; }
       updateLabel();
+      syncDateRangeConstraints(false);
       setMsg('formMsg', '', 'info');
     }
 
@@ -355,6 +400,7 @@ export class AppController {
       document.getElementById('endDate').value = event.endDate || event.startDate || '';
       document.getElementById('startTime').value = event.startTime || '09:00';
       document.getElementById('endTime').value = event.endTime || '18:00';
+      syncDateRangeConstraints(false);
       const selected = new Set(Array.isArray(event.activeWeekdays) && event.activeWeekdays.length ? event.activeWeekdays : WEEKDAYS.map(function(entry){ return entry[0]; }));
       Array.from(document.querySelectorAll('#weekdayList input')).forEach(function(input) {
         input.checked = selected.has(input.value);
@@ -402,6 +448,9 @@ export class AppController {
     }
 
     function startModifyEvent(event) {
+      if (isReadOnlyView) {
+        return;
+      }
       fillForm(event);
       const formTitle = document.getElementById('formTitle');
       if (formTitle) {
@@ -422,6 +471,7 @@ export class AppController {
     function renderEventList() {
       const list = document.getElementById('list');
       const includeArchived = document.getElementById('showArchived').checked;
+      const toggleLabel = isReadOnlyView ? 'Ver detalles' : 'Editar';
       const hasHiddenFinishedEvents = !includeArchived && (Number(summaryCache.finished || 0) > 0 || Number(summaryCache.archived || 0) > 0);
       list.innerHTML = '';
       if (!eventsCache.length) {
@@ -444,6 +494,12 @@ export class AppController {
 
       eventsCache.forEach(function(event) {
         const isExpanded = expandedEvents.has(event.id);
+        const detailActions = isReadOnlyView
+          ? ''
+          : '<div class="actions" style="margin-top:12px">' +
+              '<button class="ghost" type="button" data-action="modify">Modificar</button>' +
+              '<button class="danger" type="button" data-action="delete">Eliminar</button>' +
+            '</div>';
         const node = document.createElement('article');
         node.className = 'eventItem' + (isExpanded ? ' expanded' : '');
         node.innerHTML =
@@ -462,7 +518,7 @@ export class AppController {
             '</div>' +
             '<div class="summaryActions">' +
               statusPill(event) +
-              '<button class="ghost" type="button" data-action="toggle">Editar</button>' +
+              '<button class="ghost" type="button" data-action="toggle">' + toggleLabel + '</button>' +
             '</div>' +
           '</div>' +
           '<div class="eventDetails">' +
@@ -475,18 +531,20 @@ export class AppController {
               '<div><strong>Dias activos</strong><br>' + escapeHtml(Array.isArray(event.activeWeekdays) ? event.activeWeekdays.join(', ') : '-') + '</div>' +
               '<div><strong>Ubicacion</strong><br>' + escapeHtml(event.location || '-') + '</div>' +
             '</div>' +
-            '<div class="actions" style="margin-top:12px">' +
-              '<button class="ghost" type="button" data-action="modify">Modificar</button>' +
-              '<button class="danger" type="button" data-action="delete">Eliminar</button>' +
-            '</div>' +
+            detailActions +
           '</div>';
 
         node.querySelector('[data-action="toggle"]').onclick = function(ev) {
           ev.stopPropagation();
           toggleEventDetails(event.id);
         };
-        node.querySelector('[data-action="modify"]').onclick = function() { startModifyEvent(event); };
-        node.querySelector('[data-action="delete"]').onclick = async function() {
+        const modifyButton = node.querySelector('[data-action="modify"]');
+        if (modifyButton) {
+          modifyButton.onclick = function() { startModifyEvent(event); };
+        }
+        const deleteButton = node.querySelector('[data-action="delete"]');
+        if (deleteButton) {
+          deleteButton.onclick = async function() {
           if (!confirm('Eliminar evento?')) return;
           const response = await fetch(api + '/' + event.id, { method: 'DELETE' });
           const payload = await response.json().catch(function(){ return {}; });
@@ -502,7 +560,8 @@ export class AppController {
           }
           expandedEvents.delete(event.id);
           await load();
-        };
+          };
+        }
         node.querySelector('.eventSummary').onclick = function(ev) {
           if (ev.target.closest('button')) {
             return;
@@ -531,6 +590,10 @@ export class AppController {
     }
 
     async function saveEvent() {
+      if (isReadOnlyView) {
+        setMsg('listMsg', 'Solo los organizadores pueden crear o modificar eventos.', 'info');
+        return;
+      }
       const body = {
         title: document.getElementById('title').value.trim(),
         description: document.getElementById('description').value.trim(),
@@ -545,6 +608,14 @@ export class AppController {
         setMsg('formMsg', 'Completa titulo, rango de fechas y ubicacion.', 'err');
         return;
       }
+      if (body.endDate < body.startDate) {
+        setMsg('formMsg', 'La fecha de finalizacion no puede ser anterior a la fecha de inicio.', 'err');
+        return;
+      }
+      if (body.startDate === body.endDate && body.endTime <= body.startTime) {
+        setMsg('formMsg', 'Para eventos del mismo dia, la hora de finalizacion debe ser posterior a la hora de inicio.', 'err');
+        return;
+      }
       const editingId = document.getElementById('editingId').value;
       const method = editingId ? 'PUT' : 'POST';
       const url = editingId ? (api + '/' + editingId) : api;
@@ -556,7 +627,7 @@ export class AppController {
       });
       const payload = await response.json().catch(function(){ return {}; });
       if (!response.ok) {
-        setMsg('formMsg', payload.message || 'No se pudo guardar el evento', 'err');
+        setMsg('formMsg', translateEventFormError(payload.message), 'err');
         return;
       }
       setMsg('formMsg', editingId ? 'Evento actualizado.' : 'Evento creado.', 'ok');
@@ -574,14 +645,31 @@ export class AppController {
     document.getElementById('saveBtn').onclick = saveEvent;
     document.getElementById('cancelEdit').onclick = resetForm;
     document.getElementById('reload').onclick = load;
+    document.getElementById('startDate').addEventListener('change', function() {
+      const adjusted = syncDateRangeConstraints(false);
+      if (adjusted) {
+        setMsg('formMsg', 'La fecha de finalizacion se ajusto automaticamente para que no quede antes de la fecha de inicio.', 'info');
+      }
+    });
+    document.getElementById('endDate').addEventListener('change', function() {
+      const adjusted = syncDateRangeConstraints(false);
+      if (adjusted) {
+        setMsg('formMsg', 'La fecha de finalizacion no puede ser anterior a la fecha de inicio. La ajustamos automaticamente.', 'info');
+      }
+    });
     document.getElementById('showArchived').addEventListener('change', load);
     document.getElementById('searchLocation').addEventListener('keydown', function(event) {
       if (event.key === 'Enter') { event.preventDefault(); searchLocation(); }
     });
+    if (isReadOnlyView) {
+      setMsg('listMsg', 'Vista de solo lectura para participantes. Solo los organizadores pueden crear o editar eventos.', 'info');
+    }
     load();
     setInterval(function() { if (document.visibilityState === 'visible') { load(); } }, 15000);
     document.addEventListener('visibilitychange', function() { if (document.visibilityState === 'visible') { load(); } });
-    loadGoogleOrFallback();
+    if (!isReadOnlyView) {
+      loadGoogleOrFallback();
+    }
   </script>
 </body>
 </html>`;
@@ -594,7 +682,7 @@ export class AppController {
   }
 
   @Get('data/:id')
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id', new ParseUUIDPipe()) id: string) {
     return await this.appService.findOne(id);
   }
 
@@ -622,7 +710,7 @@ export class AppController {
 
   @Put('data/:id')
   async update(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body()
     event: {
       title?: string;
@@ -639,7 +727,7 @@ export class AppController {
   }
 
   @Delete('data/:id')
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return await this.appService.remove(id);
   }
 }

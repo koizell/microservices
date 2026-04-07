@@ -8,9 +8,9 @@ export class SalesMetric {
   @Column({ type: 'date', unique: true })
   day: string;
 
-  @Column({ type: 'numeric', default: 0 })
+  @Column({ name: 'total_revenue', type: 'numeric', default: 0 })
   totalRevenue: number;
 
-  @Column({ default: 0 })
+  @Column({ name: 'total_tickets', default: 0 })
   totalTickets: number;
 }

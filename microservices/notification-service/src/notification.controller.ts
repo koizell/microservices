@@ -1,15 +1,21 @@
-import { Body, Controller, Delete, Get, Header, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, Redirect, Req } from '@nestjs/common';
 import { NotificationService } from './notification.service';
-import { renderNotificationUi } from './notification-ui';
 
 @Controller('notifications')
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
+  @Get('health')
+  status() {
+    return { service: 'notification-service', status: 'ok' };
+  }
+
   @Get()
-  @Header('Content-Type', 'text/html; charset=utf-8')
-  renderUi() {
-    return renderNotificationUi();
+  @Redirect()
+  redirectToFrontend(@Req() req: any) {
+    const baseUrl = String(process.env.FRONTEND_URL || 'http://localhost:3009').trim().replace(/\/+$/, '');
+    const target = new URL('/?panel=notificaciones', baseUrl).toString();
+    return { url: target };
   }
 
   @Post('data')
@@ -41,17 +47,32 @@ export class NotificationController {
   }
 
   @Get('campaigns/tickets')
-  async getTicketCampaignOptions() {
-    return await this.notificationService.getTicketCampaignOptions();
+  async getTicketCampaignOptions(
+    @Query('organizerId') organizerId?: string,
+    @Query('organizerEmail') organizerEmail?: string,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    const withInactive = ['true', '1', 'yes'].includes(String(includeInactive ?? '').toLowerCase());
+    return await this.notificationService.getTicketCampaignOptions({
+      organizerId,
+      organizerEmail,
+      includeInactive: withInactive,
+    });
   }
 
   @Get('campaigns/tickets/:ticketTypeId/audience')
   async getTicketCampaignAudience(
     @Param('ticketTypeId') ticketTypeId: string,
     @Query('includeAdmin') includeAdmin?: string,
+    @Query('organizerId') organizerId?: string,
+    @Query('organizerEmail') organizerEmail?: string,
   ) {
     const withAdmin = ['true', '1', 'yes'].includes(String(includeAdmin ?? '').toLowerCase());
-    return await this.notificationService.getTicketCampaignAudience(ticketTypeId, { includeAdmin: withAdmin });
+    return await this.notificationService.getTicketCampaignAudience(ticketTypeId, {
+      includeAdmin: withAdmin,
+      organizerId,
+      organizerEmail,
+    });
   }
 
   @Post('campaigns/tickets/send')
@@ -65,6 +86,8 @@ export class NotificationController {
       includeAdmin?: boolean | string;
       simulate?: boolean | string;
       testRecipients?: string[] | string;
+      organizerId?: string;
+      organizerEmail?: string;
     },
   ) {
     return await this.notificationService.sendTicketCampaign(body);
@@ -76,12 +99,12 @@ export class NotificationController {
   }
 
   @Get('data')
-  async findAll(@Query('limit') limit?: string) {
-    return await this.notificationService.findAll(Number(limit ?? 50));
+  async findAll(@Query('limit') limit?: string, @Query('recipient') recipient?: string) {
+    return await this.notificationService.findAll(Number(limit ?? 50), recipient);
   }
 
   @Delete('data/:id')
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return await this.notificationService.remove(id);
   }
 }

@@ -1,11 +1,76 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Favorite } from './favorite.entity';
 import { Session } from './session.entity';
 
+function normalizeServiceBaseUrl(value: string | undefined, fallback: string) {
+  const candidate = String(value ?? fallback)
+    .trim()
+    .replace(/\/+$/, '');
+
+  if (!candidate) {
+    return fallback;
+  }
+
+  return /^https?:\/\//i.test(candidate) ? candidate : `http://${candidate}`;
+}
+
+function buildInternalServiceHeaders(headers: Record<string, string> = {}) {
+  const normalized = { ...headers, 'x-forwarded-by': 'agenda-service' };
+  const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
+  if (internalApiKey) {
+    normalized['x-internal-api-key'] = internalApiKey;
+  }
+  return normalized;
+}
+
+const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+type Weekday = (typeof WEEKDAYS)[number];
+type CalendarStatusFilter = 'all' | 'pending' | 'past';
+type OccurrenceStatus = 'pending' | 'active' | 'past';
+
+type EventCalendarSource = {
+  id: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  date?: string | Date;
+  startDate?: string | Date;
+  endDate?: string | Date | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  activeWeekdays?: string[] | null;
+  status?: string;
+  isArchived?: boolean;
+};
+
+type CalendarOccurrence = {
+  id: string;
+  eventId: string;
+  title: string;
+  description: string;
+  location: string;
+  date: string;
+  weekday: Weekday;
+  startTime: string;
+  endTime: string;
+  startAt: string;
+  endAt: string;
+  occurrenceStatus: OccurrenceStatus;
+  eventStatus: string;
+  isArchived: boolean;
+};
+
 @Injectable()
 export class AgendaService {
+  private readonly logger = new Logger(AgendaService.name);
+  private readonly eventServiceBaseUrl = normalizeServiceBaseUrl(process.env.EVENT_SERVICE_URL, 'http://localhost:3001');
+  private readonly gatewayBaseUrl = normalizeServiceBaseUrl(
+    process.env.GATEWAY_BASE_URL ?? process.env.GATEWAY_URL,
+    'http://localhost:3008',
+  );
+
   constructor(
     @InjectRepository(Session)
     private readonly sessionRepository: Repository<Session>,
@@ -30,6 +95,283 @@ export class AgendaService {
     return await this.favoriteRepository.save(favorite);
   }
 
+  private formatDateOnly(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private parseDateOnly(value: string): Date {
+    const [year, month, day] = value.split('-').map((part) => Number(part));
+    return new Date(year, month - 1, day, 0, 0, 0, 0);
+  }
+
+  private dateOnlyFromUnknown(value: string | Date | undefined | null, fieldName: string): string {
+    if (!value) {
+      throw new BadRequestException(`${fieldName} is required`);
+    }
+
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) {
+        throw new BadRequestException(`${fieldName} is invalid`);
+      }
+      return this.formatDateOnly(value);
+    }
+
+    const text = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      return text;
+    }
+
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(`${fieldName} is invalid`);
+    }
+
+    return this.formatDateOnly(parsed);
+  }
+
+  private normalizeTimeInput(value: string | undefined | null, fieldName: string, fallback: string): string {
+    const text = String(value ?? fallback).trim();
+    if (!/^\d{2}:\d{2}$/.test(text)) {
+      throw new BadRequestException(`${fieldName} must use HH:mm format`);
+    }
+
+    const [hours, minutes] = text.split(':').map((part) => Number(part));
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      throw new BadRequestException(`${fieldName} is invalid`);
+    }
+
+    return text;
+  }
+
+  private normalizeWeekdays(values?: string[] | null): Weekday[] {
+    const unique = new Set<Weekday>();
+    for (const value of Array.isArray(values) ? values : []) {
+      const normalized = String(value || '').trim().toLowerCase() as Weekday;
+      if (WEEKDAYS.includes(normalized)) {
+        unique.add(normalized);
+      }
+    }
+
+    if (unique.size === 0) {
+      return [...WEEKDAYS];
+    }
+
+    return WEEKDAYS.filter((weekday) => unique.has(weekday));
+  }
+
+  private combineDateTime(dateValue: string, timeValue: string): Date {
+    const [year, month, day] = dateValue.split('-').map((part) => Number(part));
+    const [hours, minutes] = timeValue.split(':').map((part) => Number(part));
+    return new Date(year, month - 1, day, hours, minutes, 0, 0);
+  }
+
+  private weekdayName(date: Date): Weekday {
+    return WEEKDAYS[(date.getDay() + 6) % 7];
+  }
+
+  private normalizeStatusFilter(value?: string): CalendarStatusFilter {
+    const normalized = String(value ?? 'all').trim().toLowerCase();
+    if (normalized === 'pending' || normalized === 'past') {
+      return normalized;
+    }
+    return 'all';
+  }
+
+  private occurrenceStatus(startAt: Date, endAt: Date): OccurrenceStatus {
+    const now = new Date();
+    if (now > endAt) {
+      return 'past';
+    }
+    if (now >= startAt) {
+      return 'active';
+    }
+    return 'pending';
+  }
+
+  private async fetchEventCalendarSources(limit = 200): Promise<EventCalendarSource[]> {
+    try {
+      return await this.requestEventCalendarSources(this.eventServiceBaseUrl, limit);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      const canRetryThroughGateway =
+        this.gatewayBaseUrl !== this.eventServiceBaseUrl &&
+        (reason.includes('responded 401') || reason.includes('responded 403') || reason.includes('Failed to fetch') || reason.includes('fetch failed'));
+
+      if (canRetryThroughGateway) {
+        this.logger.warn(`Falling back to api-gateway for agenda calendar after direct event-service failure: ${reason}`);
+        try {
+          return await this.requestEventCalendarSources(this.gatewayBaseUrl, limit);
+        } catch (gatewayError) {
+          const gatewayReason = gatewayError instanceof Error ? gatewayError.message : 'unknown error';
+          this.logger.error(`Unable to fetch events for agenda calendar through api-gateway: ${gatewayReason}`);
+          throw new ServiceUnavailableException('No se pudo consultar la programacion desde event-service');
+        }
+      }
+
+      this.logger.error(`Unable to fetch events for agenda calendar: ${reason}`);
+      throw new ServiceUnavailableException('No se pudo consultar la programacion desde event-service');
+    }
+  }
+
+  private async requestEventCalendarSources(baseUrl: string, limit: number): Promise<EventCalendarSource[]> {
+    const url = new URL('/events/data', baseUrl);
+    url.searchParams.set('includeArchived', 'true');
+    url.searchParams.set('limit', String(Math.max(1, Math.min(limit, 500))));
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const response = await fetch(url.toString(), {
+        headers: buildInternalServiceHeaders(),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`${baseUrl} responded ${response.status}`);
+      }
+
+      const payload = await response.json().catch(() => []);
+      return Array.isArray(payload) ? (payload as EventCalendarSource[]) : [];
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private expandOccurrences(event: EventCalendarSource, rangeStart: string, rangeEnd: string): CalendarOccurrence[] {
+    const eventId = String(event.id || '').trim();
+    if (!eventId) {
+      return [];
+    }
+
+    const startDate = this.dateOnlyFromUnknown(event.startDate ?? event.date, 'startDate');
+    const endDate = this.dateOnlyFromUnknown(event.endDate ?? startDate, 'endDate');
+    const startTime = this.normalizeTimeInput(event.startTime, 'startTime', '09:00');
+    const endTime = this.normalizeTimeInput(event.endTime, 'endTime', '18:00');
+    const weekdays = this.normalizeWeekdays(event.activeWeekdays);
+    const windowStart = this.parseDateOnly(rangeStart);
+    const windowEnd = this.parseDateOnly(rangeEnd);
+    const eventStart = this.parseDateOnly(startDate);
+    const eventEnd = this.parseDateOnly(endDate);
+
+    if (windowEnd < windowStart || eventEnd < eventStart) {
+      return [];
+    }
+
+    const effectiveStart = eventStart > windowStart ? eventStart : windowStart;
+    const effectiveEnd = eventEnd < windowEnd ? eventEnd : windowEnd;
+    if (effectiveEnd < effectiveStart) {
+      return [];
+    }
+
+    const weekdaySet = new Set(weekdays);
+    const items: CalendarOccurrence[] = [];
+    const cursor = new Date(effectiveStart.getTime());
+
+    while (cursor <= effectiveEnd) {
+      const weekday = this.weekdayName(cursor);
+      if (weekdaySet.has(weekday)) {
+        const date = this.formatDateOnly(cursor);
+        const startAt = this.combineDateTime(date, startTime);
+        const endAt = this.combineDateTime(date, endTime);
+        items.push({
+          id: `${eventId}:${date}`,
+          eventId,
+          title: String(event.title || 'Evento sin titulo').trim(),
+          description: String(event.description || '').trim(),
+          location: String(event.location || '').trim(),
+          date,
+          weekday,
+          startTime,
+          endTime,
+          startAt: startAt.toISOString(),
+          endAt: endAt.toISOString(),
+          occurrenceStatus: this.occurrenceStatus(startAt, endAt),
+          eventStatus: String(event.status || '').trim() || 'upcoming',
+          isArchived: Boolean(event.isArchived),
+        });
+      }
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return items;
+  }
+
+  async getCalendarData(params: { start?: string; end?: string; status?: string }) {
+    const start = this.dateOnlyFromUnknown(params.start ?? new Date(), 'start');
+    const end = this.dateOnlyFromUnknown(params.end ?? start, 'end');
+    const startDate = this.parseDateOnly(start);
+    const endDate = this.parseDateOnly(end);
+
+    if (endDate < startDate) {
+      throw new BadRequestException('end cannot be earlier than start');
+    }
+
+    const status = this.normalizeStatusFilter(params.status);
+    const events = await this.fetchEventCalendarSources();
+    const allItems: CalendarOccurrence[] = [];
+
+    for (const event of events) {
+      const occurrences = this.expandOccurrences(event, start, end);
+      for (const occurrence of occurrences) {
+        allItems.push(occurrence);
+      }
+    }
+
+    allItems.sort((left, right) => {
+      const timeDiff = new Date(left.startAt).getTime() - new Date(right.startAt).getTime();
+      if (timeDiff !== 0) {
+        return timeDiff;
+      }
+      return left.title.localeCompare(right.title, 'es');
+    });
+
+    const filteredItems = allItems.filter((item) => {
+      if (status === 'pending') {
+        return item.occurrenceStatus !== 'past';
+      }
+      if (status === 'past') {
+        return item.occurrenceStatus === 'past';
+      }
+      return true;
+    });
+
+    let pending = 0;
+    let active = 0;
+    let past = 0;
+    const uniqueDays = new Set<string>();
+
+    for (const item of allItems) {
+      uniqueDays.add(item.date);
+      if (item.occurrenceStatus === 'past') {
+        past += 1;
+      } else if (item.occurrenceStatus === 'active') {
+        active += 1;
+      } else {
+        pending += 1;
+      }
+    }
+
+    return {
+      range: { start, end },
+      status,
+      totals: {
+        events: events.length,
+        occurrences: allItems.length,
+        visible: filteredItems.length,
+        pending,
+        active,
+        past,
+        days: uniqueDays.size,
+      },
+      items: filteredItems,
+    };
+  }
+
   async listFavoritesByUser(userId: string, limit = 50) {
     return await this.favoriteRepository.find({
       where: { userId },
@@ -39,11 +381,24 @@ export class AgendaService {
   }
 
   async getSummary(userId: string) {
-    const [sessions, favorites] = await Promise.all([
+    const today = this.formatDateOnly(new Date());
+    const inThirtyDays = this.formatDateOnly(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+
+    const [sessions, favorites, calendar] = await Promise.all([
       this.sessionRepository.count(),
       this.favoriteRepository.count({ where: { userId } }),
+      this.getCalendarData({ start: today, end: inThirtyDays, status: 'all' }).catch(() => ({
+        totals: { pending: 0, active: 0, past: 0, visible: 0 },
+      })),
     ]);
 
-    return { sessions, favorites };
+    return {
+      sessions,
+      favorites,
+      pending: Number(calendar.totals?.pending ?? 0),
+      active: Number(calendar.totals?.active ?? 0),
+      past: Number(calendar.totals?.past ?? 0),
+      visible: Number(calendar.totals?.visible ?? 0),
+    };
   }
 }

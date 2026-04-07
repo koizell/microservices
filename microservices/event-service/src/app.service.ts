@@ -273,10 +273,10 @@ export class AppService implements OnModuleInit {
     const startDateValue = this.parseDateOnly(startDate);
     const endDateValue = this.parseDateOnly(endDate);
     if (endDateValue < startDateValue) {
-      throw new BadRequestException('endDate cannot be earlier than startDate');
+      throw new BadRequestException('La fecha de finalizacion no puede ser anterior a la fecha de inicio');
     }
     if (startDate === endDate && endTime <= startTime) {
-      throw new BadRequestException('endTime must be later than startTime for single-day events');
+      throw new BadRequestException('Para eventos del mismo dia, la hora de finalizacion debe ser posterior a la hora de inicio');
     }
 
     return {

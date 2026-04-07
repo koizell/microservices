@@ -21,3 +21,5 @@ Thumbs.db
 !**/.env.example
 **/.git.monorepo-backup/
 *.tsbuildinfo
+.copilot-test-*.json
+**/.copilot-test-*.json

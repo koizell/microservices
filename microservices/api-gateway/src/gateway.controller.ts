@@ -10,31 +10,13 @@
   UseGuards,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { GatewayServiceKey, resolveGatewayServiceUrls } from './gateway.constants';
 import { RoleGuard } from './guards/role.guard';
 import { Roles } from './decorators/roles.decorator';
 
-function normalizeServiceBaseUrl(value: string | undefined, fallback: string) {
-  const candidate = String(value ?? fallback)
-    .trim()
-    .replace(/\/+$/, '');
-
-  if (!candidate) {
-    return fallback;
-  }
-
-  return /^https?:\/\//i.test(candidate) ? candidate : `http://${candidate}`;
-}
-
 @Controller('gateway')
 export class GatewayController {
-  private readonly services = {
-    user: normalizeServiceBaseUrl(process.env.USER_SERVICE_URL, 'http://localhost:3000'),
-    event: normalizeServiceBaseUrl(process.env.EVENT_SERVICE_URL, 'http://localhost:3001'),
-    ticketing: normalizeServiceBaseUrl(process.env.TICKETING_SERVICE_URL, 'http://localhost:3002'),
-    notification: normalizeServiceBaseUrl(process.env.NOTIFICATION_SERVICE_URL, 'http://localhost:3003'),
-    credential: normalizeServiceBaseUrl(process.env.CREDENTIAL_SERVICE_URL, 'http://localhost:3004'),
-    analytics: normalizeServiceBaseUrl(process.env.ANALYTICS_SERVICE_URL, 'http://localhost:3006'),
-  };
+  private readonly services = resolveGatewayServiceUrls();
 
   constructor(private readonly jwtService: JwtService) {}
 
@@ -363,7 +345,7 @@ updateAutoRefresh();
   async login(@Body() body: { email: string; password: string }) {
     const response = await fetch(this.urlFor('user', '/users/auth/login'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.buildInternalHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
 
@@ -447,11 +429,15 @@ updateAutoRefresh();
     this.assertToken(authorization);
 
     const [credential, analytics] = await Promise.all([
-      this.postJson(this.urlFor('credential', '/credentials/from-ticket'), {
-        orderItemId: body.orderItemId,
-        ticketTypeId: body.ticketTypeId,
-        attendeeName: body.attendeeName,
-      }),
+      this.postJson(
+        this.urlFor('credential', '/credentials/from-ticket'),
+        {
+          orderItemId: body.orderItemId,
+          ticketTypeId: body.ticketTypeId,
+          attendeeName: body.attendeeName,
+        },
+        authorization ? { Authorization: authorization } : undefined,
+      ),
       this.postJson(this.urlFor('analytics', '/analytics/ingest/ticket-purchased'), {
         amount: body.amount,
         quantity: body.quantity ?? 1,
@@ -699,7 +685,7 @@ function doLogout() {
 
   private async safeFetch<T>(url: string, fallback: T): Promise<T> {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: this.buildInternalHeaders() });
       if (!response.ok) {
         return fallback;
       }
@@ -709,10 +695,10 @@ function doLogout() {
     }
   }
 
-  private async postJson(url: string, payload: unknown) {
+  private async postJson(url: string, payload: unknown, headers?: Record<string, string>) {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.buildInternalHeaders({ 'Content-Type': 'application/json', ...(headers ?? {}) }),
       body: JSON.stringify(payload),
     });
 
@@ -723,7 +709,16 @@ function doLogout() {
     return await response.json();
   }
 
-  private urlFor(service: keyof GatewayController['services'], path: string) {
+  private buildInternalHeaders(headers: Record<string, string> = {}) {
+    const normalized = { ...headers, 'x-forwarded-by': 'api-gateway' };
+    const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
+    if (internalApiKey) {
+      normalized['x-internal-api-key'] = internalApiKey;
+    }
+    return normalized;
+  }
+
+  private urlFor(service: GatewayServiceKey, path: string) {
     return `${this.services[service]}${path}`;
   }
 }

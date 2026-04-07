@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, Param, Post, Put, Query, UseGuards, BadRequestException, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Header, Param, ParseUUIDPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { TicketService } from './ticket.service';
 import { RoleGuard } from './guards/role.guard';
 import { Roles } from './decorators/roles.decorator';
@@ -6,6 +6,11 @@ import { Roles } from './decorators/roles.decorator';
 @Controller('tickets')
 export class TicketController {
   constructor(private readonly ticketService: TicketService) {}
+
+  @Get('health')
+  status() {
+    return { service: 'ticketing-service', status: 'ok' };
+  }
 
   @Get()
   @Header('Content-Type', 'text/html; charset=utf-8')
@@ -70,12 +75,66 @@ export class TicketController {
       <div class="links">
         <a href="/tickets/client">Ir a interfaz cliente</a>
         <a href="/tickets/organizer">Ir a interfaz organizador</a>
-        <a href="http://localhost:3004/credentials" target="_blank" rel="noreferrer">Abrir credential-service</a>
+        <a id="credentialConsoleLink" href="/credentials" target="_blank" rel="noreferrer">Abrir credential-service</a>
       </div>
     </section>
   </div>
 
   <script>
+    const credentialHost = window.location.hostname || 'localhost';
+    const credentialPort = window.location.port || '';
+    const credentialIsLocal = credentialHost === 'localhost' || credentialHost === '127.0.0.1';
+    const credentialBaseUrl = credentialIsLocal && credentialPort && credentialPort !== '3008'
+      ? ('http://' + credentialHost + ':3008')
+      : window.location.origin;
+    let token = localStorage.getItem('eventhive.session.token') || '';
+    document.getElementById('credentialConsoleLink').href = credentialBaseUrl + '/credentials/staff';
+
+    function persistSession(payload) {
+      if (!payload || !payload.token) {
+        return;
+      }
+      token = payload.token;
+      localStorage.setItem('eventhive.session.token', token);
+    }
+
+    function requestSessionFromContainer() {
+      if (token) {
+        return Promise.resolve();
+      }
+
+      return new Promise(function(resolve) {
+        let settled = false;
+        const finish = function() {
+          if (settled) return;
+          settled = true;
+          window.removeEventListener('message', onMessage);
+          resolve();
+        };
+
+        const onMessage = function(event) {
+          if (!event.data || event.data.type !== 'eventhive:session') {
+            return;
+          }
+          persistSession(event.data);
+          finish();
+        };
+
+        window.addEventListener('message', onMessage);
+
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'eventhive:request-session' }, '*');
+          }
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: 'eventhive:request-session' }, '*');
+          }
+        } catch {}
+
+        setTimeout(finish, 1200);
+      });
+    }
+
     function setMsg(message, type) {
       const el = document.getElementById('msg');
       el.className = message ? ('msg ' + type) : 'msg';
@@ -89,10 +148,23 @@ export class TicketController {
         setMsg('Debes capturar el hash QR.', 'err');
         return;
       }
+
+      if (!token) {
+        await requestSessionFromContainer();
+      }
+
+      if (!token) {
+        setMsg('Debes abrir esta vista con una sesion admin activa.', 'err');
+        return;
+      }
+
       try {
-        const r = await fetch('http://localhost:3004/credentials/validate', {
+        const r = await fetch(credentialBaseUrl + '/credentials/validate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+          },
           body: JSON.stringify({ qrCodeHash, scannerId }),
         });
         const d = await r.json().catch(function(){ return {}; });
@@ -104,6 +176,13 @@ export class TicketController {
         setMsg(e.message || 'No se pudo validar QR.', 'err');
       }
     }
+
+    window.addEventListener('message', function(event) {
+      if (!event.data || event.data.type !== 'eventhive:session') {
+        return;
+      }
+      persistSession(event.data);
+    });
   </script>
 </body>
 </html>`;
@@ -231,7 +310,6 @@ export class TicketController {
       <button id="tabBuy" onclick="showTab('buy')">Compra</button>
       <button id="tabOrders" onclick="showTab('orders')">Ordenes</button>
       <button id="tabSummary" onclick="showTab('summary')">Resumen</button>
-      <button id="tabAnalytics" onclick="showTab('analytics')">📊 Analytics</button>
     </nav>
 
     <section id="panel-catalog" class="panel active">
@@ -336,42 +414,19 @@ export class TicketController {
       </div>
     </section>
 
-    <section id="panel-analytics" class="panel">
-      <div class="card">
-        <h2>Analytics — Ventas en Tiempo Real</h2>
-        <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-          <div class="kpi"><div class="label">Ingresos hoy</div><div class="value" id="kAnalyticsRevToday">$0.00</div></div>
-          <div class="kpi"><div class="label">Tickets hoy</div><div class="value" id="kAnalyticsTicketsToday">0</div></div>
-          <div class="kpi"><div class="label">Días registrados</div><div class="value" id="kAnalyticsDays">0</div></div>
-        </div>
-        <div id="analyticsMsg" class="msg"></div>
-        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-          <button class="ghost" onclick="loadAnalytics()">🔄 Actualizar</button>
-          <button class="primary" onclick="openAnalyticsDashboard()">↗ Ver Analytics Completo</button>
-        </div>
-        <table style="margin-top:14px">
-          <thead>
-            <tr>
-              <th>Día</th>
-              <th>Ingresos</th>
-              <th>Tickets vendidos</th>
-            </tr>
-          </thead>
-          <tbody id="analyticsRows"></tbody>
-        </table>
-        <p class="small" style="margin-top:8px">Datos en tiempo real desde <strong>analytics-service</strong> (puerto 3006). Los eventos de compra se publican via RabbitMQ.</p>
-      </div>
-    </section>
   </div>
 
   <script>
-    const API = '/tickets';
     const FORCED_ROLE = '${forcedRole}';
     const HOST_NAME = window.location.hostname || 'localhost';
     const IS_LOCAL_HOST = HOST_NAME === 'localhost' || HOST_NAME === '127.0.0.1';
-    const USER_SERVICE_BASE_URL = IS_LOCAL_HOST ? ('http://' + HOST_NAME + ':3000/users') : '/users';
-    const EVENT_SERVICE_BASE_URL = IS_LOCAL_HOST ? ('http://' + HOST_NAME + ':3001/events') : '/events';
-    const ANALYTICS_SERVICE_BASE_URL = IS_LOCAL_HOST ? ('http://' + HOST_NAME + ':3006/analytics') : '/analytics';
+    const CURRENT_ORIGIN = window.location.origin;
+    const GATEWAY_BASE_URL = IS_LOCAL_HOST && window.location.port && window.location.port !== '3008'
+      ? ('http://' + HOST_NAME + ':3008')
+      : CURRENT_ORIGIN;
+    const API = GATEWAY_BASE_URL + '/tickets';
+    const USER_SERVICE_BASE_URL = GATEWAY_BASE_URL + '/users';
+    const EVENT_SERVICE_BASE_URL = GATEWAY_BASE_URL + '/events';
 
     function readSessionFromHash() {
       try {
@@ -441,7 +496,7 @@ export class TicketController {
 
     function canAccessTab(tab) {
       if (userRole === 'admin') {
-        return ['catalog', 'orders', 'summary', 'analytics'].includes(tab);
+        return ['catalog', 'orders', 'summary'].includes(tab);
       }
       if (userRole === 'standard') {
         return ['catalog', 'buy', 'orders'].includes(tab);
@@ -641,7 +696,7 @@ export class TicketController {
         name = userRole === 'admin' ? 'catalog' : (userRole === 'standard' ? 'buy' : 'catalog');
       }
 
-      ['catalog','buy','orders','summary','analytics'].forEach(function(tab){
+      ['catalog','buy','orders','summary'].forEach(function(tab){
         document.getElementById('panel-' + tab).classList.remove('active');
         document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.remove('active');
       });
@@ -649,7 +704,6 @@ export class TicketController {
       document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
       if (name === 'orders') loadOrders();
       if (name === 'summary') loadSummary();
-      if (name === 'analytics') loadAnalytics();
     }
 
     function applyRoleUi() {
@@ -658,7 +712,6 @@ export class TicketController {
       document.getElementById('createTypeForm').style.display = isAdmin ? 'grid' : 'none';
       document.getElementById('ordersEmail').style.display = isAdmin ? 'inline-block' : 'none';
       document.getElementById('tabSummary').style.display = isAdmin ? 'inline-block' : 'none';
-      document.getElementById('tabAnalytics').style.display = isAdmin ? 'inline-block' : 'none';
       document.getElementById('tabBuy').style.display = isAdmin ? 'none' : (isStandard ? 'inline-block' : 'none');
       document.getElementById('tabOrders').style.display = (isAdmin || isStandard) ? 'inline-block' : 'none';
 
@@ -722,9 +775,6 @@ export class TicketController {
       document.getElementById('buyAmount').textContent = '$' + amount.toFixed(2);
     }
 
-    function openAnalyticsDashboard() {
-      window.open(ANALYTICS_SERVICE_BASE_URL, '_blank');
-    }
 
     async function loadTypes() {
       setMsg('catalogMsg', '', 'info');
@@ -998,33 +1048,6 @@ export class TicketController {
       }
     }
 
-    async function loadAnalytics() {
-      setMsg('analyticsMsg', 'Cargando datos de analytics-service…', 'info');
-      try {
-        const [sumR, dataR] = await Promise.all([
-          fetch(ANALYTICS_SERVICE_BASE_URL + '/summary'),
-          fetch(ANALYTICS_SERVICE_BASE_URL + '/data?limit=7'),
-        ]);
-        if (!sumR.ok || !dataR.ok) throw new Error('analytics-service no disponible (puerto 3006)');
-        const summary = await sumR.json();
-        const data = await dataR.json();
-        document.getElementById('kAnalyticsRevToday').textContent = '$' + Number(summary.todayRevenue || 0).toFixed(2);
-        document.getElementById('kAnalyticsTicketsToday').textContent = String(summary.todayTickets || 0);
-        document.getElementById('kAnalyticsDays').textContent = String(summary.daysTracked || 0);
-        const rows = document.getElementById('analyticsRows');
-        rows.innerHTML = '';
-        (Array.isArray(data) ? data : []).forEach(function(d) {
-          const tr = document.createElement('tr');
-          tr.innerHTML = '<td>' + (d.day || '-') + '</td>' +
-            '<td>$' + Number(d.totalRevenue || 0).toFixed(2) + '</td>' +
-            '<td>' + Number(d.totalTickets || 0) + '</td>';
-          rows.appendChild(tr);
-        });
-        setMsg('analyticsMsg', 'Sincronizado con analytics-service ✓', 'ok');
-      } catch (e) {
-        setMsg('analyticsMsg', 'No se pudo conectar: ' + e.message, 'err');
-      }
-    }
 
     function bootstrap() {
       sessionUser = token ? parseJwt(token) : null;
@@ -1085,13 +1108,19 @@ export class TicketController {
   async getTicketTypes(
     @Query('eventId') eventId?: string,
     @Query('includeInactive') includeInactive?: string,
+    @Query('organizerId') organizerId?: string,
+    @Query('organizerEmail') organizerEmail?: string,
   ) {
     const withInactive = ['true', '1', 'yes'].includes(String(includeInactive ?? '').toLowerCase());
-    return await this.ticketService.getTicketTypes(eventId, withInactive);
+    const organizer = {
+      id: String(organizerId ?? '').trim() || undefined,
+      email: String(organizerEmail ?? '').trim().toLowerCase() || undefined,
+    };
+    return await this.ticketService.getTicketTypes(eventId, withInactive, organizer);
   }
 
   @Get('types/:id/audience')
-  async getTicketTypeAudience(@Param('id') id: string, @Query('includeAdmin') includeAdmin?: string) {
+  async getTicketTypeAudience(@Param('id', new ParseUUIDPipe()) id: string, @Query('includeAdmin') includeAdmin?: string) {
     const withAdmin = ['true', '1', 'yes'].includes(String(includeAdmin ?? '').toLowerCase());
     return await this.ticketService.getTicketTypeAudienceWithOptions(id, withAdmin);
   }
@@ -1100,6 +1129,7 @@ export class TicketController {
   @UseGuards(RoleGuard)
   @Roles('admin')
   async createTicketType(
+    @Req() req: any,
     @Body()
     body: {
       name: string;
@@ -1113,14 +1143,20 @@ export class TicketController {
     if (!body.name || body.price < 0 || body.quantity < 0) {
       throw new BadRequestException('Invalid ticket type data');
     }
-    return await this.ticketService.createTicketType(body);
+    const organizer = req?.user || {};
+    return await this.ticketService.createTicketType({
+      ...body,
+      organizerId: organizer.sub || organizer.id,
+      organizerName: organizer.name,
+      organizerEmail: organizer.email,
+    });
   }
 
   @Put('types/:id')
   @UseGuards(RoleGuard)
   @Roles('admin')
   async updateTicketType(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body()
     body: {
       name?: string;
@@ -1136,14 +1172,14 @@ export class TicketController {
   @Delete('types/:id')
   @UseGuards(RoleGuard)
   @Roles('admin')
-  async deleteTicketType(@Param('id') id: string) {
+  async deleteTicketType(@Param('id', new ParseUUIDPipe()) id: string) {
     return await this.ticketService.deleteTicketType(id);
   }
 
   @Post('types/:id/restore')
   @UseGuards(RoleGuard)
   @Roles('admin')
-  async restoreTicketType(@Param('id') id: string) {
+  async restoreTicketType(@Param('id', new ParseUUIDPipe()) id: string) {
     return await this.ticketService.restoreTicketType(id);
   }
 
@@ -1202,7 +1238,7 @@ export class TicketController {
   }
 
   @Delete('data/:id')
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return await this.ticketService.remove(id);
   }
 }

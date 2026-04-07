@@ -1,7 +1,11 @@
+import { config as loadEnv } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
 import { randomUUID } from 'crypto';
-import { AppModule } from './app.module';
-import prometheus from 'prom-client';
+import { resolve } from 'path';
+import * as prometheus from 'prom-client';
+
+loadEnv({ path: resolve(process.cwd(), '.env') });
+loadEnv({ path: resolve(process.cwd(), '..', '.env'), override: false });
 
 const register = new prometheus.Registry();
 
@@ -21,7 +25,17 @@ const httpRequestTotal = new prometheus.Counter({
 
 prometheus.collectDefaultMetrics({ register });
 
+function getConfiguredInternalApiKey() {
+  return String(process.env.INTERNAL_API_KEY ?? '').trim();
+}
+
+function isPublicServicePath(pathname: string) {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  return normalized === '/metrics' || normalized.endsWith('/health');
+}
+
 async function bootstrap() {
+  const { AppModule } = await import('./app.module');
   const app = await NestFactory.create(AppModule);
   const server = app.getHttpAdapter().getInstance();
 
@@ -45,6 +59,29 @@ async function bootstrap() {
   server.get('/metrics', async (_req: any, res: any) => {
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
+  });
+
+  app.use((req: any, res: any, next: any) => {
+    const internalApiKey = getConfiguredInternalApiKey();
+    if (!internalApiKey) {
+      next();
+      return;
+    }
+
+    const pathname = new URL(req.originalUrl || req.url, 'http://agenda-service.local').pathname;
+    if (isPublicServicePath(pathname)) {
+      next();
+      return;
+    }
+
+    const headerValue = req.headers['x-internal-api-key'];
+    const providedKey = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+    if (providedKey === internalApiKey) {
+      next();
+      return;
+    }
+
+    res.status(403).json({ message: 'Acceso directo deshabilitado. Usa el API Gateway.' });
   });
 
   app.enableCors();

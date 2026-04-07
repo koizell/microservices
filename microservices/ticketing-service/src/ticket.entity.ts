@@ -8,7 +8,7 @@ export class Ticket {
   @Column({ name: 'title' })
   title: string;
 
-  @Column({ name: 'description', type: 'text' })
+  @Column({ name: 'description', type: 'text', default: '' })
   description: string;
 
   @Column({ name: 'status' })

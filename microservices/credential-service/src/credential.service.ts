@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
-import { IsNull, Repository } from 'typeorm';
+import * as QRCode from 'qrcode';
+import { In, IsNull, Repository } from 'typeorm';
 import { Credential } from './credential.entity';
 import { RabbitMqService } from './rabbitmq.service';
 
@@ -11,8 +12,36 @@ type PurchaseCredentialInput = {
   attendeeName: string;
 };
 
+function normalizeServiceBaseUrl(value: string | undefined, fallback: string) {
+  const candidate = String(value ?? fallback)
+    .trim()
+    .replace(/\/+$/, '');
+
+  if (!candidate) {
+    return fallback;
+  }
+
+  return /^https?:\/\//i.test(candidate) ? candidate : `http://${candidate}`;
+}
+
+function buildInternalServiceHeaders(headers: Record<string, string> = {}) {
+  const normalized = { ...headers, 'x-forwarded-by': 'credential-service' };
+  const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
+  if (internalApiKey) {
+    normalized['x-internal-api-key'] = internalApiKey;
+  }
+  return normalized;
+}
+
 @Injectable()
 export class CredentialService implements OnModuleInit {
+  private readonly logger = new Logger(CredentialService.name);
+  private readonly ticketingBaseUrl = normalizeServiceBaseUrl(process.env.TICKETING_SERVICE_URL, 'http://localhost:3002');
+  private readonly gatewayBaseUrl = normalizeServiceBaseUrl(
+    process.env.GATEWAY_BASE_URL ?? process.env.GATEWAY_URL,
+    'http://localhost:3008',
+  );
+
   constructor(
     @InjectRepository(Credential)
     private readonly credentialRepository: Repository<Credential>,
@@ -23,6 +52,10 @@ export class CredentialService implements OnModuleInit {
     await this.rabbitMqService.consume('ticket.purchased', async (payload) => {
       await this.ingestPurchaseEvent(payload);
     });
+  }
+
+  private shouldRetryTicketingThroughGateway(status: number) {
+    return this.gatewayBaseUrl !== this.ticketingBaseUrl && (status === 401 || status === 403);
   }
 
   private normalizePurchaseInput(data: Partial<PurchaseCredentialInput>): PurchaseCredentialInput {
@@ -44,7 +77,7 @@ export class CredentialService implements OnModuleInit {
   }
 
   private buildQrRawToken(orderItemId: string) {
-    return `${orderItemId}:${randomUUID()}:${Date.now()}`;
+    return `eventhive:ticket:${orderItemId}:${randomUUID()}`;
   }
 
   private async assignNewQrValue(credential: Credential) {
@@ -99,11 +132,230 @@ export class CredentialService implements OnModuleInit {
       .filter(Boolean);
   }
 
-  private toResponse(credential: Credential) {
+  getStaffScannerContext(requestedScannerId?: string) {
+    const preferredScannerId = String(requestedScannerId ?? '').trim();
+    const allowedScanners = this.getAllowedScanners();
+
+    if (allowedScanners.length === 0) {
+      return {
+        scannerId: preferredScannerId || 'gate-mobile',
+        scannersRestricted: false,
+        allowedScannerCount: 0,
+        source: preferredScannerId ? 'requested' : 'generated',
+        overridden: false,
+      };
+    }
+
+    const preferredIsAllowed = preferredScannerId ? allowedScanners.includes(preferredScannerId) : false;
     return {
-      ...credential,
+      scannerId: preferredIsAllowed ? preferredScannerId : allowedScanners[0],
+      scannersRestricted: true,
+      allowedScannerCount: allowedScanners.length,
+      source: preferredIsAllowed ? 'requested' : 'configured',
+      overridden: Boolean(preferredScannerId) && !preferredIsAllowed,
+    };
+  }
+
+  private async getTicketTypeNames(ticketTypeIds: string[]) {
+    const normalizedIds = [...new Set(ticketTypeIds.map((value) => String(value || '').trim()).filter(Boolean))];
+    if (normalizedIds.length === 0) {
+      return new Map<string, string>();
+    }
+
+    try {
+      let response = await fetch(`${this.ticketingBaseUrl}/tickets/types?includeInactive=true`, {
+        headers: buildInternalServiceHeaders({
+          Accept: 'application/json',
+        }),
+      });
+
+      if (!response.ok && this.shouldRetryTicketingThroughGateway(response.status)) {
+        this.logger.warn(
+          `Falling back to api-gateway for ticket type names after direct ticketing-service failure: ${response.status}`,
+        );
+        response = await fetch(`${this.gatewayBaseUrl}/tickets/types?includeInactive=true`, {
+          headers: buildInternalServiceHeaders({
+            Accept: 'application/json',
+          }),
+        });
+      }
+
+      const rawText = await response.text().catch(() => '');
+      let payload: unknown = [];
+
+      try {
+        payload = rawText ? JSON.parse(rawText) : [];
+      } catch {
+        payload = [];
+      }
+
+      if (!response.ok || !Array.isArray(payload)) {
+        this.logger.warn(`No se pudieron resolver nombres de tipos de ticket: ticketing-service respondio ${response.status}`);
+        return new Map<string, string>();
+      }
+
+      const validIds = new Set(normalizedIds);
+      const names = new Map<string, string>();
+      for (const item of payload) {
+        if (!item || typeof item !== 'object') {
+          continue;
+        }
+
+        const ticketTypeId = String((item as { id?: unknown }).id ?? '').trim();
+        const ticketTypeName = String((item as { name?: unknown }).name ?? '').trim();
+        if (!ticketTypeId || !ticketTypeName || !validIds.has(ticketTypeId)) {
+          continue;
+        }
+
+        names.set(ticketTypeId, ticketTypeName);
+      }
+
+      return names;
+    } catch (error) {
+      this.logger.warn(`No se pudieron resolver nombres de tipos de ticket: ${error instanceof Error ? error.message : String(error)}`);
+      return new Map<string, string>();
+    }
+  }
+
+  private async buildQrCodeDataUrl(qrCodeValue: string | null | undefined) {
+    if (!qrCodeValue) {
+      return null;
+    }
+
+    try {
+      return await QRCode.toDataURL(qrCodeValue, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 280,
+      });
+    } catch (error) {
+      this.logger.warn(`No se pudo generar imagen QR: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  private toResponse(
+    credential: Credential,
+    options: {
+      includeQrCodeHash?: boolean;
+      includeQrCodeValue?: boolean;
+      qrCodeDataUrl?: string | null;
+      ticketTypeName?: string;
+    } = {},
+  ) {
+    return {
+      id: credential.id,
+      credentialId: credential.id,
+      ticketId: credential.orderItemId,
+      orderItemId: credential.orderItemId,
+      ticketTypeId: credential.ticketTypeId,
+      ticketTypeName: options.ticketTypeName || credential.ticketTypeId,
+      attendeeName: credential.attendeeName,
+      isUsed: credential.isUsed,
+      usedAt: credential.usedAt,
+      usedBy: credential.usedBy,
+      createdAt: credential.createdAt,
+      revokedAt: credential.revokedAt,
+      revokedBy: credential.revokedBy,
+      revokeReason: credential.revokeReason,
+      ...(options.includeQrCodeValue ? { qrCodeValue: credential.qrCodeValue } : {}),
+      ...(options.includeQrCodeHash ? { qrCodeHash: credential.qrCodeHash } : {}),
+      ...(typeof options.qrCodeDataUrl !== 'undefined' ? { qrCodeDataUrl: options.qrCodeDataUrl } : {}),
       status: this.getCredentialStatus(credential),
     };
+  }
+
+  private async buildCredentialResponses(
+    credentials: Credential[],
+    options: {
+      includeQrCodeHash?: boolean;
+      includeQrCodeValue?: boolean;
+      includeQrCodeImage?: boolean;
+    } = {},
+  ) {
+    if (credentials.length === 0) {
+      return [];
+    }
+
+    const ticketTypeNames = await this.getTicketTypeNames(credentials.map((credential) => credential.ticketTypeId));
+
+    return await Promise.all(
+      credentials.map(async (credential) => {
+        const qrCodeDataUrl = options.includeQrCodeImage
+          ? await this.buildQrCodeDataUrl(credential.qrCodeValue)
+          : undefined;
+
+        return this.toResponse(credential, {
+          includeQrCodeHash: options.includeQrCodeHash,
+          includeQrCodeValue: options.includeQrCodeValue,
+          qrCodeDataUrl,
+          ticketTypeName: ticketTypeNames.get(credential.ticketTypeId) || credential.ticketTypeId,
+        });
+      }),
+    );
+  }
+
+  private async buildCredentialResponse(
+    credential: Credential,
+    options: {
+      includeQrCodeHash?: boolean;
+      includeQrCodeValue?: boolean;
+      includeQrCodeImage?: boolean;
+    } = {},
+  ) {
+    const [response] = await this.buildCredentialResponses([credential], options);
+    return response;
+  }
+
+  private async getOwnedOrderItemIds(authorization: string) {
+    const normalizedAuthorization = String(authorization ?? '').trim();
+    if (!normalizedAuthorization.startsWith('Bearer ')) {
+      throw new BadRequestException('Token requerido para consultar credenciales del usuario');
+    }
+
+    let response = await fetch(`${this.ticketingBaseUrl}/tickets/orders?limit=100`, {
+      headers: buildInternalServiceHeaders({
+        Accept: 'application/json',
+        Authorization: normalizedAuthorization,
+      }),
+    });
+
+    if (!response.ok && this.shouldRetryTicketingThroughGateway(response.status)) {
+      this.logger.warn(
+        `Falling back to api-gateway for owned ticket orders after direct ticketing-service failure: ${response.status}`,
+      );
+      response = await fetch(`${this.gatewayBaseUrl}/tickets/orders?limit=100`, {
+        headers: buildInternalServiceHeaders({
+          Accept: 'application/json',
+          Authorization: normalizedAuthorization,
+        }),
+      });
+    }
+
+    const rawText = await response.text().catch(() => '');
+    let payload: unknown = [];
+
+    try {
+      payload = rawText ? JSON.parse(rawText) : [];
+    } catch {
+      payload = { message: rawText };
+    }
+
+    if (!response.ok) {
+      const reason = typeof payload === 'object' && payload && 'message' in payload
+        ? String((payload as { message?: unknown }).message ?? 'Error desconocido')
+        : `ticketing-service respondio ${response.status}`;
+      this.logger.warn(`No se pudieron resolver ordenes del usuario para credenciales: ${reason}`);
+      throw new BadRequestException(reason);
+    }
+
+    if (!Array.isArray(payload)) {
+      return [];
+    }
+
+    return payload
+      .map((order) => (typeof order === 'object' && order ? String((order as { ticketId?: unknown }).ticketId ?? '').trim() : ''))
+      .filter(Boolean);
   }
 
   async ingestPurchaseEvent(payload: Partial<PurchaseCredentialInput>) {
@@ -124,12 +376,13 @@ export class CredentialService implements OnModuleInit {
     return {
       ok: true,
       created,
-      credential: this.toResponse(credential),
+      credential: await this.buildCredentialResponse(credential, { includeQrCodeHash: true, includeQrCodeValue: true }),
     };
   }
 
-  async createFromPurchase(data: PurchaseCredentialInput): Promise<Credential> {
-    return (await this.createOrReuseCredential(this.normalizePurchaseInput(data))).credential;
+  async createFromPurchase(data: PurchaseCredentialInput) {
+    const { credential } = await this.createOrReuseCredential(this.normalizePurchaseInput(data));
+    return await this.buildCredentialResponse(credential, { includeQrCodeHash: true, includeQrCodeValue: true });
   }
 
   async findAll(limit = 50) {
@@ -137,7 +390,21 @@ export class CredentialService implements OnModuleInit {
       order: { createdAt: 'DESC' },
       take: Math.max(1, Math.min(limit, 100)),
     });
-    return credentials.map((credential) => this.toResponse(credential));
+    return await this.buildCredentialResponses(credentials, { includeQrCodeHash: true, includeQrCodeValue: true });
+  }
+
+  async getCredentialsForAuthorization(authorization: string) {
+    const orderItemIds = await this.getOwnedOrderItemIds(authorization);
+    if (orderItemIds.length === 0) {
+      return [];
+    }
+
+    const credentials = await this.credentialRepository.find({
+      where: { orderItemId: In(orderItemIds) },
+      order: { createdAt: 'DESC' },
+    });
+
+    return await this.buildCredentialResponses(credentials, { includeQrCodeValue: true, includeQrCodeImage: true });
   }
 
   async countAll(): Promise<number> {
@@ -199,11 +466,18 @@ export class CredentialService implements OnModuleInit {
       return { valid: false, status: 'INVALID', reason: 'Credential no encontrada' };
     }
 
+    const ticketTypeNames = await this.getTicketTypeNames([credential.ticketTypeId]);
+    const ticketTypeName = ticketTypeNames.get(credential.ticketTypeId) || credential.ticketTypeId;
+
     if (credential.revokedAt) {
       return {
         valid: false,
         status: 'REVOKED',
         reason: credential.revokeReason || 'Credential revocada',
+        ticketTypeId: credential.ticketTypeId,
+        ticketTypeName,
+        ticketId: credential.orderItemId,
+        credentialId: credential.id,
         revokedAt: credential.revokedAt,
         revokedBy: credential.revokedBy,
       };
@@ -214,33 +488,87 @@ export class CredentialService implements OnModuleInit {
         valid: false,
         status: 'USED',
         reason: 'Credential ya utilizada',
+        ticketTypeId: credential.ticketTypeId,
+        ticketTypeName,
+        ticketId: credential.orderItemId,
+        credentialId: credential.id,
         usedAt: credential.usedAt,
         usedBy: credential.usedBy,
       };
     }
 
-    credential.isUsed = true;
-    credential.usedAt = new Date();
-    credential.usedBy = scanner;
+    const checkinAt = new Date();
+    const updateResult = await this.credentialRepository.update(
+      { id: credential.id, isUsed: false, revokedAt: IsNull() },
+      { isUsed: true, usedAt: checkinAt, usedBy: scanner },
+    );
 
-    await this.credentialRepository.save(credential);
+    if ((updateResult.affected ?? 0) !== 1) {
+      const latest = await this.credentialRepository.findOneBy({ id: credential.id });
+
+      if (!latest) {
+        return { valid: false, status: 'INVALID', reason: 'Credential no encontrada' };
+      }
+
+      if (latest.revokedAt) {
+        return {
+          valid: false,
+          status: 'REVOKED',
+          reason: latest.revokeReason || 'Credential revocada',
+          ticketTypeId: latest.ticketTypeId,
+          ticketTypeName,
+          ticketId: latest.orderItemId,
+          credentialId: latest.id,
+          revokedAt: latest.revokedAt,
+          revokedBy: latest.revokedBy,
+        };
+      }
+
+      if (latest.isUsed) {
+        return {
+          valid: false,
+          status: 'USED',
+          reason: 'Credential ya utilizada',
+          ticketTypeId: latest.ticketTypeId,
+          ticketTypeName,
+          ticketId: latest.orderItemId,
+          credentialId: latest.id,
+          usedAt: latest.usedAt,
+          usedBy: latest.usedBy,
+        };
+      }
+
+      return {
+        valid: false,
+        status: 'INVALID',
+        reason: 'No se pudo confirmar la validacion en tiempo real',
+      };
+    }
+
+    const saved = await this.credentialRepository.findOneBy({ id: credential.id });
+    if (!saved) {
+      return { valid: false, status: 'INVALID', reason: 'Credential no encontrada' };
+    }
 
     await this.rabbitMqService.publish('checkin.processed', {
-      credentialId: credential.id,
-      orderItemId: credential.orderItemId,
-      ticketTypeId: credential.ticketTypeId,
-      attendeeName: credential.attendeeName,
-      usedAt: credential.usedAt,
-      usedBy: credential.usedBy,
+      credentialId: saved.id,
+      orderItemId: saved.orderItemId,
+      ticketTypeId: saved.ticketTypeId,
+      attendeeName: saved.attendeeName,
+      usedAt: saved.usedAt,
+      usedBy: saved.usedBy,
     });
 
     return {
       valid: true,
       status: 'USED',
-      checkinAt: credential.usedAt,
-      attendeeName: credential.attendeeName,
-      credentialId: credential.id,
-      usedBy: credential.usedBy,
+      checkinAt: saved.usedAt,
+      attendeeName: saved.attendeeName,
+      credentialId: saved.id,
+      ticketId: saved.orderItemId,
+      ticketTypeId: saved.ticketTypeId,
+      ticketTypeName,
+      usedBy: saved.usedBy,
     };
   }
 
@@ -254,7 +582,7 @@ export class CredentialService implements OnModuleInit {
       return {
         ok: false,
         reason: 'La credencial ya estaba revocada',
-        credential: this.toResponse(credential),
+        credential: await this.buildCredentialResponse(credential, { includeQrCodeHash: true, includeQrCodeValue: true }),
       };
     }
 
@@ -262,7 +590,7 @@ export class CredentialService implements OnModuleInit {
       return {
         ok: false,
         reason: 'No se puede revocar una credencial ya utilizada',
-        credential: this.toResponse(credential),
+        credential: await this.buildCredentialResponse(credential, { includeQrCodeHash: true, includeQrCodeValue: true }),
       };
     }
 
@@ -282,7 +610,7 @@ export class CredentialService implements OnModuleInit {
 
     return {
       ok: true,
-      credential: this.toResponse(saved),
+      credential: await this.buildCredentialResponse(saved, { includeQrCodeHash: true, includeQrCodeValue: true }),
     };
   }
 
@@ -293,11 +621,13 @@ export class CredentialService implements OnModuleInit {
       take: Math.max(1, Math.min(limit, 200)),
     });
 
-    const repaired = [] as Array<ReturnType<CredentialService['toResponse']>>;
+    const repairedCredentials: Credential[] = [];
     for (const credential of credentials) {
       const saved = await this.assignNewQrValue(credential);
-      repaired.push(this.toResponse(saved));
+      repairedCredentials.push(saved);
     }
+
+    const repaired = await this.buildCredentialResponses(repairedCredentials, { includeQrCodeHash: true, includeQrCodeValue: true });
 
     return {
       ok: true,
@@ -308,6 +638,6 @@ export class CredentialService implements OnModuleInit {
 
   async getCredentialById(id: string) {
     const credential = await this.credentialRepository.findOneBy({ id });
-    return credential ? this.toResponse(credential) : null;
+    return credential ? await this.buildCredentialResponse(credential, { includeQrCodeHash: true, includeQrCodeValue: true, includeQrCodeImage: true }) : null;
   }
 }

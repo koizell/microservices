@@ -1,24 +1,58 @@
+import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
-import { AppModule } from './../src/app.module';
+import * as request from 'supertest';
+import { NotificationController } from './../src/notification.controller';
+import { NotificationService } from './../src/notification.service';
 
 describe('NotificationController (e2e)', () => {
   let app: INestApplication;
+  const notificationService = {
+    create: jest.fn(),
+    sendAccountConfirmationEmail: jest.fn(),
+    sendPasswordResetEmail: jest.fn(),
+    ingestTicketPurchased: jest.fn(),
+    getTicketCampaignOptions: jest.fn(),
+    getTicketCampaignAudience: jest.fn(),
+    sendTicketCampaign: jest.fn(),
+    countAll: jest.fn(),
+    findAll: jest.fn(),
+    remove: jest.fn(),
+  };
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
+      controllers: [NotificationController],
+      providers: [
+        {
+          provide: NotificationService,
+          useValue: notificationService,
+        },
+      ],
     }).compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
   });
 
-  it('/notifications (GET)', () => {
+  afterAll(async () => {
+    if (app) {
+      await app.close();
+    }
+  });
+
+  it('/notifications/health (GET)', () => {
     return request(app.getHttpServer())
-      .get('/notifications')
+      .get('/notifications/health')
       .expect(200)
-      .expect('Lista de notificaciones');
+      .expect({ service: 'notification-service', status: 'ok' });
+  });
+
+  it('/notifications (GET) redirects to frontend', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/notifications')
+      .expect(302);
+
+    expect(response.headers.location).toBe('http://localhost:3009/?panel=notificaciones');
   });
 });

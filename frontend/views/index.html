@@ -6,8 +6,8 @@
 <title>EventHive · Plataforma de Eventos</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css">
-<script src="/app.js" defer></script>
+<link rel="stylesheet" href="/css/styles.css">
+<script src="/js/app.js" defer></script>
 </head>
 <body>
 
@@ -145,7 +145,6 @@
         <button id="tabAgenda" data-roles="standard,admin" onclick="switchPanel('agenda', this)"><span class="ico">📆</span><span>Agenda</span></button>
         <button id="tabNotifs" data-roles="standard,admin" onclick="switchPanel('notificaciones', this)"><span class="ico">🔔</span><span>Avisos</span></button>
         <button id="tabAnalytica" data-roles="admin" onclick="switchPanel('analytica', this)"><span class="ico">📊</span><span>Analitica</span></button>
-        <button id="tabAdmin" data-roles="admin" onclick="switchPanel('admin', this)"><span class="ico">🛠️</span><span>Admin</span></button>
       </nav>
       <div class="top-user">
         <span id="sessRole" class="role-pill"></span>
@@ -173,8 +172,8 @@
           </article>
           <article class="panel-card admin-only">
             <div class="head"><span class="ico">📊</span><span>Centro de control</span></div>
-            <p>Gestiona usuarios, eventos y metricas desde el panel administrativo.</p>
-            <button class="cta" onclick="switchPanel('admin', document.getElementById('tabAdmin'))">Abrir Admin</button>
+            <p>Gestiona usuarios, eventos y metricas desde el panel de organizacion.</p>
+            <button class="cta" onclick="switchPanel('admin')">Abrir gestion</button>
           </article>
           <article class="panel-card guest-only">
             <div class="head"><span class="ico">👀</span><span>Modo invitado</span></div>
@@ -188,7 +187,7 @@
         <div class="service-embed">
           <div class="service-embed-bar">
             <span></span>
-            <button onclick="openService('event')">Abrir en pestana</button>
+            <button class="open-tab-btn" onclick="openService('event')">Abrir en pestana</button>
           </div>
           <iframe id="eventFrame" class="service-embed-frame" title="Event Service"></iframe>
         </div>
@@ -198,50 +197,161 @@
         <div class="service-embed">
           <div class="service-embed-bar">
             <span>Ticketing Service cargado dentro del panel principal.</span>
-            <button onclick="openService('ticketing')">Abrir aparte</button>
+            <button class="open-tab-btn" onclick="openService('ticketing')">Abrir en pestana</button>
           </div>
           <iframe id="ticketingFrame" class="service-embed-frame" title="Ticketing Service"></iframe>
         </div>
       </section>
 
-      <section id="panel-credencial" class="panel">
-        <div class="hero"><h2>Credenciales Digitales</h2><p>Tus codigos QR de acceso y validacion de entrada al evento.</p></div>
-        <div class="grid-cards">
-          <article class="panel-card"><div class="head"><span class="ico">🔐</span><span>Mi QR de acceso</span></div><p>Genera o descarga tu credencial digital para ingresar al evento.</p><button class="cta" onclick="openService('credential')">Ver credencial</button></article>
-          <article class="panel-card standard-only"><div class="head"><span class="ico">📋</span><span>Mis entradas</span></div><p>Revisa todas las entradas vinculadas a tu cuenta.</p><button class="cta" onclick="openService('ticketing')">Ver entradas</button></article>
-          <article class="panel-card admin-only"><div class="head"><span class="ico">📷</span><span>Validar en puerta</span></div><p>Escanea y valida credenciales en los puntos de acceso en tiempo real.</p><button class="cta" onclick="openService('credential', '/validate')">Validar acceso</button></article>
+      <section id="panel-credencial" class="panel service-panel">
+        <div class="service-embed">
+          <div class="service-embed-bar">
+            <span id="credentialEmbedLabel">Credential Service cargado dentro del panel principal.</span>
+            <button class="open-tab-btn" onclick="openService('credential')">Abrir en pestana</button>
+          </div>
+          <iframe id="credentialFrame" class="service-embed-frame" title="Credential Service"></iframe>
         </div>
       </section>
 
       <section id="panel-agenda" class="panel">
-        <div class="hero"><h2>Agenda</h2><p>Programacion de sesiones, talleres y ponentes del evento.</p></div>
-        <div class="grid-cards">
-          <article class="panel-card"><div class="head"><span class="ico">📆</span><span>Programacion</span></div><p>Consulta todas las sesiones y horarios del evento.</p><button class="cta" onclick="openService('agenda')">Ver agenda</button></article>
-          <article class="panel-card standard-only"><div class="head"><span class="ico">⭐</span><span>Mis favoritos</span></div><p>Sesiones marcadas para construir tu agenda personalizada.</p><button class="cta" onclick="openService('agenda', '/favorites')">Ver favoritos</button></article>
-          <article class="panel-card admin-only"><div class="head"><span class="ico">🧩</span><span>Gestionar sesiones</span></div><p>Crea y edita sesiones, asigna salas y ponentes.</p><button class="cta" onclick="openService('agenda')">Administrar agenda</button></article>
+        <div class="service-embed">
+          <div class="agenda-embed-body">
+            <div class="agenda-shell">
+          <section class="agenda-main-card">
+            <div class="agenda-toolbar">
+              <div class="agenda-toolbar-main">
+                <div>
+                  <span class="agenda-kicker" id="agendaRoleBadge">Vista agenda</span>
+                  <h3 id="agendaRangeLabel">Cargando agenda...</h3>
+                  <p id="agendaSummaryText">Preparando calendario del organizador.</p>
+                </div>
+                <div class="agenda-nav">
+                  <button type="button" class="agenda-nav-btn" id="agendaPrevBtn" aria-label="Periodo anterior">◀</button>
+                  <button type="button" class="agenda-nav-btn" id="agendaTodayBtn">Hoy</button>
+                  <button type="button" class="agenda-nav-btn" id="agendaNextBtn" aria-label="Periodo siguiente">▶</button>
+                </div>
+              </div>
+
+              <div class="agenda-toolbar-row">
+                <div class="agenda-segment" id="agendaViewSwitch">
+                  <button type="button" data-agenda-view="month" class="active">Mes</button>
+                  <button type="button" data-agenda-view="week">Semana</button>
+                  <button type="button" data-agenda-view="agenda">Agenda</button>
+                  <button type="button" data-agenda-view="day">Dia</button>
+                </div>
+
+                <div class="agenda-segment" id="agendaStatusSwitch">
+                  <button type="button" data-agenda-filter="all" class="active">Todos</button>
+                  <button type="button" data-agenda-filter="pending">Pendientes</button>
+                  <button type="button" data-agenda-filter="past">Pasados</button>
+                </div>
+              </div>
+
+              <div id="agendaFlash" class="agenda-flash" aria-live="polite"></div>
+            </div>
+
+            <div id="agendaCalendar" class="agenda-calendar"></div>
+          </section>
+
+          <aside class="agenda-side">
+            <section class="agenda-side-card">
+              <div class="agenda-side-head">
+                <div>
+                  <h3 id="agendaSelectedTitle">Detalle del dia</h3>
+                  <p id="agendaSelectedHint">Selecciona una fecha del calendario para ver horarios concretos.</p>
+                </div>
+                <span id="agendaSelectedCount" class="agenda-counter">0 bloques</span>
+              </div>
+              <div id="agendaDayTimeline" class="agenda-day-timeline"></div>
+            </section>
+
+            <section class="agenda-side-card">
+              <div class="agenda-mini-grid">
+                <article>
+                  <strong id="agendaPendingCount">0</strong>
+                  <span>Pendientes</span>
+                </article>
+                <article>
+                  <strong id="agendaActiveCount">0</strong>
+                  <span>En curso</span>
+                </article>
+                <article>
+                  <strong id="agendaPastCount">0</strong>
+                  <span>Pasados</span>
+                </article>
+                <article>
+                  <strong id="agendaVisibleCount">0</strong>
+                  <span>En vista</span>
+                </article>
+              </div>
+              <div class="agenda-side-note">La agenda se construye automaticamente con los eventos creados en el microservicio de eventos.</div>
+            </section>
+            </aside>
+          </div>
         </div>
       </section>
 
       <section id="panel-notificaciones" class="panel">
-        <div class="hero"><h2>Notificaciones</h2><p>Comunicacion centralizada para usuarios y asistentes.</p></div>
-        <div class="grid-cards">
-          <article class="panel-card"><div class="head"><span class="ico">📩</span><span>Bandeja</span></div><p>Visualiza mensajes pendientes y recientes.</p><button class="cta" onclick="openService('notification')">Abrir notification-service</button></article>
-          <article class="panel-card admin-only"><div class="head"><span class="ico">📣</span><span>Difusion masiva</span></div><p>Envia avisos globales a todos los usuarios.</p><button class="cta" onclick="openService('notification')">Crear aviso</button></article>
-          <article class="panel-card"><div class="head"><span class="ico">⚙️</span><span>Preferencias</span></div><p>Configura tipos de alertas y recordatorios.</p><button class="cta" onclick="openService('mobile')">Configurar</button></article>
+        <div class="notifications-grid">
+          <section class="notifications-card">
+            <div class="notifications-head">
+              <div>
+                <h3>Ventas recientes</h3>
+                <p>Solo compras registradas para tus tickets.</p>
+              </div>
+              <button class="cta" id="notifReloadBtn" type="button">Recargar</button>
+            </div>
+            <div id="notifList" class="notifications-list"></div>
+          </section>
+
+          <section class="notifications-card">
+            <div class="notifications-head">
+              <div>
+                <h3>Mensaje a compradores</h3>
+                <p>Envia un correo personalizado a quienes compraron un ticket tuyo.</p>
+              </div>
+            </div>
+
+            <div class="notifications-form">
+              <label>
+                Ticket objetivo
+                <select id="notifTicketSelect"></select>
+              </label>
+
+              <div id="notifAudienceMeta" class="notifications-meta"></div>
+
+              <label>
+                Asunto del correo
+                <input id="notifSubject" type="text" placeholder="Actualizacion importante del evento">
+              </label>
+
+              <label>
+                Mensaje
+                <textarea id="notifMessage" placeholder="Escribe el mensaje que recibiran los compradores"></textarea>
+              </label>
+
+              <div class="notifications-actions">
+                <button class="cta notif-send-btn" id="notifSendBtn" type="button">Enviar correo</button>
+              </div>
+
+              <div id="notifSendStatus" class="notif-status"></div>
+            </div>
+          </section>
         </div>
       </section>
 
-      <section id="panel-analytica" class="panel">
-        <div class="hero"><h2>Analitica y Reportes</h2><p>Metricas de ventas, asistencia y perfil demografico en tiempo real.</p></div>
-        <div class="grid-cards admin-only">
-          <article class="panel-card"><div class="head"><span class="ico">💰</span><span>Ventas en tiempo real</span></div><p>Ingresos totales, volumen de entradas y tasa de conversion por evento.</p><button class="cta" onclick="openService('analytics', '/sales')">Ver ventas</button></article>
-          <article class="panel-card"><div class="head"><span class="ico">👥</span><span>Aforo y asistencia</span></div><p>Check-ins en vivo y ocupacion por sesion o sala.</p><button class="cta" onclick="openService('analytics', '/attendance')">Ver asistencia</button></article>
-          <article class="panel-card"><div class="head"><span class="ico">📊</span><span>Perfil demografico</span></div><p>Ubicacion, tipo de entrada y segmentacion de asistentes del evento.</p><button class="cta" onclick="openService('analytics', '/summary')">Ver reportes</button></article>
+      <section id="panel-analytica" class="panel service-panel">
+        <div class="service-embed">
+          <div class="service-embed-bar">
+            <span></span>
+            <button class="open-tab-btn" onclick="openService('analytics')">Abrir en pestana</button>
+          </div>
+          <iframe id="analyticsFrame" class="service-embed-frame" title="Analytics Service"></iframe>
         </div>
       </section>
 
       <section id="panel-admin" class="panel">
-        <div class="hero"><h2>Panel Administrativo</h2><p>Solo administradores: operacion integral de microservicios.</p></div>
+        <div class="hero"><h2>Panel de Gestion</h2><p>Solo organizadores: operacion integral de microservicios.</p></div>
         <div class="grid-cards admin-only">
           <article class="panel-card"><div class="head"><span class="ico">👥</span><span>Usuarios</span></div><p>Alta, baja y modificacion de cuentas.</p><button class="cta" onclick="openService('user', '/data')">Abrir user-service</button></article>
           <article class="panel-card"><div class="head"><span class="ico">🧩</span><span>Gateway</span></div><p>Orquestacion de servicios y dashboard consolidado.</p><button class="cta" onclick="openService('gateway')">Abrir api-gateway</button></article>

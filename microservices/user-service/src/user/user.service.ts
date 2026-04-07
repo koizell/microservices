@@ -126,8 +126,8 @@ export class UserService {
 	async findByEmail(email: string): Promise<User | null> {
 		const normalizedEmail = this.normalizeEmail(email);
 		return await this.userRepository
-			.createQueryBuilder('user')
-			.where('LOWER(user.email) = :email', { email: normalizedEmail })
+			.createQueryBuilder('u')
+			.where('LOWER(u.email) = :email', { email: normalizedEmail })
 			.getOne();
 	}
 

@@ -7,6 +7,8 @@ envVarGroups:
         value: --dns-result-order=ipv4first
       - key: JWT_SECRET
         generateValue: true
+      - key: INTERNAL_API_KEY
+        generateValue: true
       - key: DB_SYNCHRONIZE
         value: "false"
       - key: DB_POOL_MAX
@@ -23,7 +25,7 @@ services:
     rootDir: microservices/user-service
     buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
-    healthCheckPath: /users
+    healthCheckPath: /users/health
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
@@ -44,7 +46,7 @@ services:
     rootDir: microservices/event-service
     buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
-    healthCheckPath: /events
+    healthCheckPath: /events/health
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
@@ -58,7 +60,7 @@ services:
     rootDir: microservices/ticketing-service
     buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
-    healthCheckPath: /tickets
+    healthCheckPath: /tickets/health
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
@@ -87,7 +89,7 @@ services:
     rootDir: microservices/notification-service
     buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/main
-    healthCheckPath: /notifications
+    healthCheckPath: /notifications/health
     envVars:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
@@ -108,12 +110,6 @@ services:
       - key: SMTP_SECURE
         value: "false"
       - key: EMAIL_FROM
-        sync: false
-      - key: RESEND_API_KEY
-        sync: false
-      - key: RESEND_FROM
-        sync: false
-      - key: RESEND_REPLY_TO
         sync: false
 
   - type: web
@@ -229,5 +225,15 @@ services:
       - key: ANALYTICS_SERVICE_URL
         fromService:
           name: eventhive-analytics-service
+          type: web
+          property: hostport
+      - key: AGENDA_SERVICE_URL
+        fromService:
+          name: eventhive-agenda-service
+          type: web
+          property: hostport
+      - key: MOBILE_SERVICE_URL
+        fromService:
+          name: eventhive-mobile-api-service
           type: web
           property: hostport

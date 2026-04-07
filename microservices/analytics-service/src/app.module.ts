@@ -5,7 +5,12 @@ import { APP_GUARD } from '@nestjs/core';
 import { AnalyticsController } from './analytics.controller';
 import { RabbitMqService } from './rabbitmq.service';
 import { AnalyticsService } from './analytics.service';
+import { AnalyticsSchemaService } from './analytics-schema.service';
+import { AnalyticsIngestionService } from './analytics-ingestion.service';
 import { SalesMetric } from './sales-metric.entity';
+import { SalesMetricTicket } from './sales-metric-ticket.entity';
+import { SalesMetricRepository } from './sales-metric.repository';
+import { SalesMetricTicketRepository } from './sales-metric-ticket.repository';
 import { RoleGuard } from './guards/role.guard';
 
 const databaseUrl = String(process.env.DATABASE_URL ?? '').trim();
@@ -25,8 +30,8 @@ const databaseUrl = String(process.env.DATABASE_URL ?? '').trim();
             password: process.env.DB_PASSWORD ?? '',
             database: process.env.DB_NAME ?? 'postgres',
           }),
-      entities: [SalesMetric],
-      synchronize: process.env.DB_SYNCHRONIZE === 'true',
+      entities: [SalesMetric, SalesMetricTicket],
+      synchronize: false,
       autoLoadEntities: true,
       extra: {
         max: Number(process.env.DB_POOL_MAX ?? 3),
@@ -38,11 +43,15 @@ const databaseUrl = String(process.env.DATABASE_URL ?? '').trim();
       secret: process.env.JWT_SECRET ?? 'dev_only_change_me',
       signOptions: { expiresIn: '1h' },
     }),
-    TypeOrmModule.forFeature([SalesMetric]),
+    TypeOrmModule.forFeature([SalesMetric, SalesMetricTicket]),
   ],
   controllers: [AnalyticsController],
   providers: [
+    AnalyticsSchemaService,
     AnalyticsService,
+    AnalyticsIngestionService,
+    SalesMetricRepository,
+    SalesMetricTicketRepository,
     RabbitMqService,
     {
       provide: APP_GUARD,
