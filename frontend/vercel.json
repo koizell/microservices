@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "/views/index.html"
+      "destination": "/views/index"
     },
     {
       "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)",
