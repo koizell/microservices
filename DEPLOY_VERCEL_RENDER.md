@@ -43,7 +43,9 @@ Nota de build en Render:
 
 ## Paso 2. Configurar Vercel
 
-1. Crea el proyecto apuntando a la carpeta frontend como Root Directory.
+1. Puedes desplegar de dos formas:
+   - Recomendado: crea el proyecto apuntando a la carpeta frontend como Root Directory.
+   - Alternativa compatible: crea el proyecto apuntando a la raiz del repo. El repo ya incluye vercel.json y api/proxy.js en la raiz para evitar 404 en `/` cuando Vercel no usa frontend como root.
 2. Agrega estas variables de entorno en Vercel con las URLs publicas de Render:
    - GATEWAY_RENDER_URL
    - USER_SERVICE_RENDER_URL
@@ -54,7 +56,7 @@ Nota de build en Render:
    - ANALYTICS_SERVICE_RENDER_URL
    - AGENDA_SERVICE_RENDER_URL
    - MOBILE_SERVICE_RENDER_URL
-3. Despliega. Las reglas de frontend/vercel.json haran que cada ruta publica pase por el proxy de frontend/api/proxy/[[...path]].js.
+3. Despliega. Si el root de Vercel es frontend, aplican las reglas de frontend/vercel.json. Si el root es la raiz del repo, aplican las reglas equivalentes de vercel.json y api/proxy.js en la raiz.
 
 ## Paso 3. Verificaciones recomendadas
 

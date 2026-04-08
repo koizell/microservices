@@ -1,0 +1,31 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/frontend/views/index.html"
+    },
+    {
+      "source": "/css/:path*",
+      "destination": "/frontend/css/:path*"
+    },
+    {
+      "source": "/js/:path*",
+      "destination": "/frontend/js/:path*"
+    },
+    {
+      "source": "/assets/:path*",
+      "destination": "/frontend/assets/:path*"
+    },
+    {
+      "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)",
+      "destination": "/api/proxy?service=:service"
+    },
+    {
+      "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)/:path*",
+      "destination": "/api/proxy?service=:service&path=:path*"
+    }
+  ]
+}
