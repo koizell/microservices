@@ -10,15 +10,17 @@
   UseGuards,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { GatewayServiceKey, resolveGatewayServiceUrls } from './gateway.constants';
+import { GatewayServiceKey } from './gateway.constants';
+import { GatewayProxyService } from './gateway-proxy.service';
 import { RoleGuard } from './guards/role.guard';
 import { Roles } from './decorators/roles.decorator';
 
 @Controller('gateway')
 export class GatewayController {
-  private readonly services = resolveGatewayServiceUrls();
-
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly gatewayProxyService: GatewayProxyService,
+    private readonly jwtService: JwtService,
+  ) {}
 
   @Get()
   @Header('Content-Type', 'text/html; charset=utf-8')
@@ -343,9 +345,9 @@ updateAutoRefresh();
 
   @Post('login')
   async login(@Body() body: { email: string; password: string }) {
-    const response = await fetch(this.urlFor('user', '/users/auth/login'), {
+    const response = await this.gatewayProxyService.requestService('user', '/users/auth/login', {
       method: 'POST',
-      headers: this.buildInternalHeaders({ 'Content-Type': 'application/json' }),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
 
@@ -393,12 +395,12 @@ updateAutoRefresh();
     this.assertToken(authorization);
 
     const [users, events, tickets, notifications, credentials, analytics] = await Promise.all([
-      this.safeFetch(this.urlFor('user', '/users/summary'), { total: 0 }),
-      this.safeFetch(this.urlFor('event', '/events/summary'), { total: 0 }),
-      this.safeFetch(this.urlFor('ticketing', '/tickets/summary'), { total: 0 }),
-      this.safeFetch(this.urlFor('notification', '/notifications/summary'), { total: 0 }),
-      this.safeFetch(this.urlFor('credential', '/credentials/summary'), { total: 0 }),
-      this.safeFetch(this.urlFor('analytics', '/analytics/summary'), { daysTracked: 0 }),
+      this.safeFetch('user', '/users/summary', { total: 0 }),
+      this.safeFetch('event', '/events/summary', { total: 0 }),
+      this.safeFetch('ticketing', '/tickets/summary', { total: 0 }),
+      this.safeFetch('notification', '/notifications/summary', { total: 0 }),
+      this.safeFetch('credential', '/credentials/summary', { total: 0 }),
+      this.safeFetch('analytics', '/analytics/summary', { daysTracked: 0 }),
     ]);
 
     return {
@@ -430,7 +432,8 @@ updateAutoRefresh();
 
     const [credential, analytics] = await Promise.all([
       this.postJson(
-        this.urlFor('credential', '/credentials/from-ticket'),
+        'credential',
+        '/credentials/from-ticket',
         {
           orderItemId: body.orderItemId,
           ticketTypeId: body.ticketTypeId,
@@ -438,13 +441,13 @@ updateAutoRefresh();
         },
         authorization ? { Authorization: authorization } : undefined,
       ),
-      this.postJson(this.urlFor('analytics', '/analytics/ingest/ticket-purchased'), {
+      this.postJson('analytics', '/analytics/ingest/ticket-purchased', {
         amount: body.amount,
         quantity: body.quantity ?? 1,
       }),
     ]);
 
-    const notification = await this.postJson(this.urlFor('notification', '/notifications/data'), {
+    const notification = await this.postJson('notification', '/notifications/data', {
       message: `Compra procesada para ${body.attendeeName}`,
       recipient: body.recipientEmail ?? req.user?.email ?? 'attendee@example.com',
       read: false,
@@ -683,9 +686,9 @@ function doLogout() {
     }
   }
 
-  private async safeFetch<T>(url: string, fallback: T): Promise<T> {
+  private async safeFetch<T>(service: GatewayServiceKey, path: string, fallback: T): Promise<T> {
     try {
-      const response = await fetch(url, { headers: this.buildInternalHeaders() });
+      const response = await this.gatewayProxyService.requestService(service, path);
       if (!response.ok) {
         return fallback;
       }
@@ -695,10 +698,15 @@ function doLogout() {
     }
   }
 
-  private async postJson(url: string, payload: unknown, headers?: Record<string, string>) {
-    const response = await fetch(url, {
+  private async postJson(
+    service: GatewayServiceKey,
+    path: string,
+    payload: unknown,
+    headers?: Record<string, string>,
+  ) {
+    const response = await this.gatewayProxyService.requestService(service, path, {
       method: 'POST',
-      headers: this.buildInternalHeaders({ 'Content-Type': 'application/json', ...(headers ?? {}) }),
+      headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
       body: JSON.stringify(payload),
     });
 
@@ -709,17 +717,5 @@ function doLogout() {
     return await response.json();
   }
 
-  private buildInternalHeaders(headers: Record<string, string> = {}) {
-    const normalized = { ...headers, 'x-forwarded-by': 'api-gateway' };
-    const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
-    if (internalApiKey) {
-      normalized['x-internal-api-key'] = internalApiKey;
-    }
-    return normalized;
-  }
-
-  private urlFor(service: GatewayServiceKey, path: string) {
-    return `${this.services[service]}${path}`;
-  }
 }
 

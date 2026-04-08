@@ -31,10 +31,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: NOTIFICATION_SERVICE_URL
-        fromService:
-          name: eventhive-notification-service
-          type: web
-          property: hostport
+        value: https://eventhive-notification-service.onrender.com
       - key: APP_BASE_URL
         sync: false
 
@@ -66,20 +63,11 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: EVENT_SERVICE_URL
-        fromService:
-          name: eventhive-event-service
-          type: web
-          property: hostport
+        value: https://eventhive-event-service.onrender.com
       - key: CREDENTIAL_SERVICE_URL
-        fromService:
-          name: eventhive-credential-service
-          type: web
-          property: hostport
+        value: https://eventhive-credential-service.onrender.com
       - key: NOTIFICATION_SERVICE_URL
-        fromService:
-          name: eventhive-notification-service
-          type: web
-          property: hostport
+        value: https://eventhive-notification-service.onrender.com
 
   - type: web
     runtime: node
@@ -95,10 +83,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: TICKETING_SERVICE_URL
-        fromService:
-          name: eventhive-ticketing-service
-          type: web
-          property: hostport
+        value: https://eventhive-ticketing-service.onrender.com
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -125,6 +110,10 @@ services:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
         sync: false
+      - key: TICKETING_SERVICE_URL
+        value: https://eventhive-ticketing-service.onrender.com
+      - key: GATEWAY_BASE_URL
+        value: https://eventhive-api-gateway.onrender.com
 
   - type: web
     runtime: node
@@ -139,6 +128,10 @@ services:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
         sync: false
+      - key: EVENT_SERVICE_URL
+        value: https://eventhive-event-service.onrender.com
+      - key: GATEWAY_BASE_URL
+        value: https://eventhive-api-gateway.onrender.com
 
   - type: web
     runtime: node
@@ -166,25 +159,13 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: EVENT_SERVICE_URL
-        fromService:
-          name: eventhive-event-service
-          type: web
-          property: hostport
+        value: https://eventhive-event-service.onrender.com
       - key: TICKETING_SERVICE_URL
-        fromService:
-          name: eventhive-ticketing-service
-          type: web
-          property: hostport
+        value: https://eventhive-ticketing-service.onrender.com
       - key: NOTIFICATION_SERVICE_URL
-        fromService:
-          name: eventhive-notification-service
-          type: web
-          property: hostport
+        value: https://eventhive-notification-service.onrender.com
       - key: AGENDA_SERVICE_URL
-        fromService:
-          name: eventhive-agenda-service
-          type: web
-          property: hostport
+        value: https://eventhive-agenda-service.onrender.com
 
   - type: web
     runtime: node
@@ -198,42 +179,18 @@ services:
     envVars:
       - fromGroup: eventhive-shared
       - key: USER_SERVICE_URL
-        fromService:
-          name: eventhive-user-service
-          type: web
-          property: hostport
+        value: https://eventhive-user-service.onrender.com
       - key: EVENT_SERVICE_URL
-        fromService:
-          name: eventhive-event-service
-          type: web
-          property: hostport
+        value: https://eventhive-event-service.onrender.com
       - key: TICKETING_SERVICE_URL
-        fromService:
-          name: eventhive-ticketing-service
-          type: web
-          property: hostport
+        value: https://eventhive-ticketing-service.onrender.com
       - key: NOTIFICATION_SERVICE_URL
-        fromService:
-          name: eventhive-notification-service
-          type: web
-          property: hostport
+        value: https://eventhive-notification-service.onrender.com
       - key: CREDENTIAL_SERVICE_URL
-        fromService:
-          name: eventhive-credential-service
-          type: web
-          property: hostport
+        value: https://eventhive-credential-service.onrender.com
       - key: ANALYTICS_SERVICE_URL
-        fromService:
-          name: eventhive-analytics-service
-          type: web
-          property: hostport
+        value: https://eventhive-analytics-service.onrender.com
       - key: AGENDA_SERVICE_URL
-        fromService:
-          name: eventhive-agenda-service
-          type: web
-          property: hostport
+        value: https://eventhive-agenda-service.onrender.com
       - key: MOBILE_SERVICE_URL
-        fromService:
-          name: eventhive-mobile-api-service
-          type: web
-          property: hostport
+        value: https://eventhive-mobile-api-service.onrender.com

@@ -1,9 +1,11 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import {
+  buildServiceBaseUrlCandidates,
   GATEWAY_PREFIX_TO_SERVICE,
   GatewayServiceKey,
   GATEWAY_SERVICE_CONFIG,
+  resolveGatewayServiceUrlCandidates,
   resolveGatewayServiceUrls,
 } from './gateway.constants';
 
@@ -27,11 +29,19 @@ const RESPONSE_BLOCKED_HEADERS = new Set([...HOP_BY_HOP_HEADERS, 'content-encodi
 export class GatewayProxyService {
   private readonly logger = new Logger(GatewayProxyService.name);
   private readonly serviceUrls = resolveGatewayServiceUrls();
+  private readonly serviceUrlCandidates = resolveGatewayServiceUrlCandidates();
 
   constructor(private readonly jwtService: JwtService) {}
 
   get services() {
     return this.serviceUrls;
+  }
+
+  async requestService(service: GatewayServiceKey, path: string, init?: RequestInit) {
+    return await this.fetchServiceResponse(service, path, {
+      ...init,
+      headers: this.buildInternalHeaders(this.normalizeStringHeaders(init?.headers)),
+    });
   }
 
   urlFor(service: GatewayServiceKey, path: string) {
@@ -69,10 +79,7 @@ export class GatewayProxyService {
 
   async safeFetch<T>(service: GatewayServiceKey, path: string, fallback: T, init?: RequestInit): Promise<T> {
     try {
-      const response = await fetch(this.urlFor(service, path), {
-        ...init,
-        headers: this.buildInternalHeaders(this.normalizeStringHeaders(init?.headers)),
-      });
+      const response = await this.requestService(service, path, init);
       if (!response.ok) {
         return fallback;
       }
@@ -83,13 +90,13 @@ export class GatewayProxyService {
   }
 
   async postJson(service: GatewayServiceKey, path: string, payload: unknown, init?: RequestInit) {
-    const response = await fetch(this.urlFor(service, path), {
+    const response = await this.requestService(service, path, {
       method: 'POST',
       ...init,
-      headers: this.buildInternalHeaders({
+      headers: {
         'Content-Type': 'application/json',
         ...this.normalizeStringHeaders(init?.headers),
-      }),
+      },
       body: JSON.stringify(payload),
     });
 
@@ -113,10 +120,6 @@ export class GatewayProxyService {
 
     this.verifyAuthorizationIfPresent(typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined);
 
-    const targetBaseUrl = this.serviceUrls[service];
-    const targetUrl = new URL(requestUrl.pathname, `${targetBaseUrl}/`);
-    targetUrl.search = requestUrl.search;
-
     const requestInit: RequestInit = {
       method: req.method,
       headers: this.extractForwardHeaders(req.headers),
@@ -131,7 +134,7 @@ export class GatewayProxyService {
     }
 
     try {
-      const upstream = await fetch(targetUrl, requestInit);
+      const upstream = await this.fetchServiceResponse(service, `${requestUrl.pathname}${requestUrl.search}`, requestInit);
       res.status(upstream.status);
 
       upstream.headers.forEach((value, key) => {
@@ -182,6 +185,27 @@ export class GatewayProxyService {
 
     outgoing['accept-encoding'] = 'identity';
     return this.buildInternalHeaders(outgoing);
+  }
+
+  private async fetchServiceResponse(service: GatewayServiceKey, path: string, init?: RequestInit) {
+    const errors: string[] = [];
+
+    for (const [index, baseUrl] of this.serviceUrlCandidates[service].entries()) {
+      const targetUrl = new URL(path, `${baseUrl}/`);
+
+      try {
+        const response = await fetch(targetUrl, init);
+        if (index > 0) {
+          this.logger.warn(`Fallback to ${baseUrl} for ${service}${path}`);
+        }
+        return response;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        errors.push(`${baseUrl}: ${reason}`);
+      }
+    }
+
+    throw new Error(errors.join(' | ') || 'fetch failed');
   }
 
   private async readRequestBody(req: any) {
