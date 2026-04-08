@@ -4,10 +4,6 @@
   "trailingSlash": false,
   "rewrites": [
     {
-      "source": "/",
-      "destination": "/views/index"
-    },
-    {
       "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)",
       "destination": "/api/proxy?service=:service"
     },
