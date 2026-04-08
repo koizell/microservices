@@ -50,12 +50,15 @@ async function bootstrap() {
     res.end(await register.metrics());
   });
 
+  // Rate limiter configurable por variable de entorno
   const requestCountByIp = new Map<string, { count: number; resetAt: number }>();
+  const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000", 10); // 1 minuto por defecto
+  const RATE_LIMIT_MAX_REQUESTS = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "1000", 10); // 1000 por defecto
   app.use((req: any, res: any, next: any) => {
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     const now = Date.now();
-    const windowMs = 60_000;
-    const maxRequests = 120;
+    const windowMs = RATE_LIMIT_WINDOW_MS;
+    const maxRequests = RATE_LIMIT_MAX_REQUESTS;
 
     const entry = requestCountByIp.get(ip);
     if (!entry || now > entry.resetAt) {
