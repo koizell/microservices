@@ -5,39 +5,39 @@ export class Credential {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'order_item_id' })
   orderItemId: string;
 
-  @Column()
+  @Column({ name: 'ticket_type_id' })
   ticketTypeId: string;
 
-  @Column()
+  @Column({ name: 'attendee_name' })
   attendeeName: string;
 
-  @Column({ unique: true })
+  @Column({ name: 'qr_code_hash', unique: true })
   qrCodeHash: string;
 
-  @Column({ type: 'varchar', nullable: true, unique: true })
+  @Column({ name: 'qr_code_value', type: 'varchar', nullable: true, unique: true })
   qrCodeValue: string | null;
 
-  @Column({ default: false })
+  @Column({ name: 'is_used', default: false })
   isUsed: boolean;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'used_at', type: 'timestamp', nullable: true })
   usedAt: Date | null;
 
-  @Column({ nullable: true })
+  @Column({ name: 'used_by', nullable: true })
   usedBy: string | null;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ name: 'created_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ name: 'revoked_at', type: 'timestamp', nullable: true })
   revokedAt: Date | null;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ name: 'revoked_by', type: 'varchar', nullable: true })
   revokedBy: string | null;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ name: 'revoke_reason', type: 'text', nullable: true })
   revokeReason: string | null;
 }

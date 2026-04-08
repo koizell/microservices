@@ -164,10 +164,33 @@ CREATE TABLE IF NOT EXISTS credentials (
   ticket_type_id VARCHAR(120) NOT NULL,
   attendee_name VARCHAR(200) NOT NULL,
   qr_code_hash VARCHAR(255) NOT NULL UNIQUE,
+  qr_code_value VARCHAR(255) NULL UNIQUE,
   is_used BOOLEAN NOT NULL DEFAULT FALSE,
   used_at TIMESTAMP NULL,
-  used_by VARCHAR(120) NULL
+  used_by VARCHAR(120) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  revoked_at TIMESTAMP NULL,
+  revoked_by VARCHAR(120) NULL,
+  revoke_reason TEXT NULL
 );
+
+ALTER TABLE credentials
+  ADD COLUMN IF NOT EXISTS qr_code_value VARCHAR(255) NULL,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP NULL,
+  ADD COLUMN IF NOT EXISTS revoked_by VARCHAR(120) NULL,
+  ADD COLUMN IF NOT EXISTS revoke_reason TEXT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_credentials_qr_code_value_unique
+  ON credentials (qr_code_value)
+  WHERE qr_code_value IS NOT NULL;
+
+UPDATE credentials
+SET
+  is_used = COALESCE(is_used, FALSE),
+  created_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+WHERE is_used IS NULL
+  OR created_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS sessions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

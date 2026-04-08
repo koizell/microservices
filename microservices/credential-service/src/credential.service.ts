@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/c
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
 import * as QRCode from 'qrcode';
-import { In, IsNull, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import { Credential } from './credential.entity';
 import { RabbitMqService } from './rabbitmq.service';
 
@@ -49,9 +49,58 @@ export class CredentialService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    await this.ensureCredentialSchema();
     await this.rabbitMqService.consume('ticket.purchased', async (payload) => {
       await this.ingestPurchaseEvent(payload);
     });
+  }
+
+  private async ensureCredentialSchema() {
+    await this.credentialRepository.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+
+    await this.credentialRepository.query(`
+      CREATE TABLE IF NOT EXISTS credentials (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        order_item_id VARCHAR(120) NOT NULL,
+        ticket_type_id VARCHAR(120) NOT NULL,
+        attendee_name VARCHAR(200) NOT NULL,
+        qr_code_hash VARCHAR(255) NOT NULL UNIQUE,
+        qr_code_value VARCHAR(255) NULL UNIQUE,
+        is_used BOOLEAN NOT NULL DEFAULT FALSE,
+        used_at TIMESTAMP NULL,
+        used_by VARCHAR(120) NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        revoked_at TIMESTAMP NULL,
+        revoked_by VARCHAR(120) NULL,
+        revoke_reason TEXT NULL
+      )
+    `);
+
+    await this.credentialRepository.query(`
+      ALTER TABLE credentials
+        ADD COLUMN IF NOT EXISTS qr_code_value VARCHAR(255) NULL,
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP NULL,
+        ADD COLUMN IF NOT EXISTS revoked_by VARCHAR(120) NULL,
+        ADD COLUMN IF NOT EXISTS revoke_reason TEXT NULL
+    `);
+
+    await this.credentialRepository.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_credentials_qr_code_value_unique
+      ON credentials (qr_code_value)
+      WHERE qr_code_value IS NOT NULL
+    `);
+
+    await this.credentialRepository.query(`
+      UPDATE credentials
+      SET
+        is_used = COALESCE(is_used, FALSE),
+        created_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+      WHERE is_used IS NULL
+        OR created_at IS NULL
+    `);
+
+    this.logger.log('Verified credentials schema');
   }
 
   private shouldRetryTicketingThroughGateway(status: number) {
@@ -416,10 +465,7 @@ export class CredentialService implements OnModuleInit {
       this.countAll(),
       this.credentialRepository.countBy({ isUsed: true }),
       this.credentialRepository.countBy({ qrCodeValue: IsNull() }),
-      this.credentialRepository
-        .createQueryBuilder('credential')
-        .where('credential.revokedAt IS NOT NULL')
-        .getCount(),
+      this.credentialRepository.countBy({ revokedAt: Not(IsNull()) }),
     ]);
     const rabbitmq = this.rabbitMqService.getStatus();
     const allowedScanners = this.getAllowedScanners();
