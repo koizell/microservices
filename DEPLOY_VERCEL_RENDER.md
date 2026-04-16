@@ -32,7 +32,12 @@
    - SMTP_USER
    - SMTP_PASS
    - EMAIL_FROM si no quieres reutilizar SMTP_USER como remitente
-4. Si mas adelante quieres colas reales, agrega manualmente RABBITMQ_URL en:
+4. Verifica que el blueprint tambien conecte correctamente estas URLs entre servicios:
+   - eventhive-event-service: TICKETING_SERVICE_URL y GATEWAY_BASE_URL
+   - eventhive-agenda-service: EVENT_SERVICE_URL, TICKETING_SERVICE_URL y GATEWAY_BASE_URL
+   - eventhive-ticketing-service: EVENT_SERVICE_URL, CREDENTIAL_SERVICE_URL y NOTIFICATION_SERVICE_URL
+   - eventhive-credential-service y eventhive-analytics-service: GATEWAY_BASE_URL
+5. Si mas adelante quieres colas reales, agrega manualmente RABBITMQ_URL en:
    - eventhive-ticketing-service
    - eventhive-notification-service
    - eventhive-credential-service
@@ -72,6 +77,7 @@ Nota de build en Render:
 - DB_SYNCHRONIZE: queda en false para evitar cambios destructivos de esquema en cloud.
 - APP_BASE_URL: debe apuntar a Vercel para que confirmacion de correo y reset funcionen desde el dominio publico.
 - NODE_OPTIONS: usa --dns-result-order=ipv4first para evitar que Node intente resolver Supabase por IPv6 primero en Render.
+- EVENT_SERVICE_URL, TICKETING_SERVICE_URL y GATEWAY_BASE_URL: varias vistas y filtros por compras dependen de estas rutas internas; si faltan, los health checks pueden seguir en verde pero Agenda y Eventos fallan para cuentas standard.
 
 ## Notas operativas
 

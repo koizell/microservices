@@ -48,6 +48,10 @@ services:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
         sync: false
+      - key: TICKETING_SERVICE_URL
+        value: https://eventhive-ticketing-service.onrender.com
+      - key: GATEWAY_BASE_URL
+        value: https://eventhive-api-gateway.onrender.com
 
   - type: web
     runtime: node
@@ -146,6 +150,12 @@ services:
       - fromGroup: eventhive-shared
       - key: DATABASE_URL
         sync: false
+      - key: EVENT_SERVICE_URL
+        value: https://eventhive-event-service.onrender.com
+      - key: TICKETING_SERVICE_URL
+        value: https://eventhive-ticketing-service.onrender.com
+      - key: GATEWAY_BASE_URL
+        value: https://eventhive-api-gateway.onrender.com
 
   - type: web
     runtime: node
