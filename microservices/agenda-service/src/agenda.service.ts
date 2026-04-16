@@ -26,6 +26,44 @@ function buildInternalServiceHeaders(headers: Record<string, string> = {}) {
   return normalized;
 }
 
+function resolveInternalRequestTimeoutMs() {
+  const fallback = process.env.NODE_ENV === 'production' ? 20000 : 8000;
+  const configured = Number(process.env.INTERNAL_FETCH_TIMEOUT_MS ?? fallback);
+  if (!Number.isFinite(configured)) {
+    return fallback;
+  }
+  return Math.max(3000, Math.min(Math.trunc(configured), 60000));
+}
+
+function describeServiceRequestError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'unknown error';
+  }
+
+  return [error.name, error.message]
+    .filter(Boolean)
+    .join(': ');
+}
+
+function isRetryableServiceRequestError(error: unknown): boolean {
+  const reason = describeServiceRequestError(error).toLowerCase();
+  return (
+    reason.includes('responded 401') ||
+    reason.includes('responded 403') ||
+    reason.includes('responded 404') ||
+    reason.includes('responded 500') ||
+    reason.includes('responded 502') ||
+    reason.includes('responded 503') ||
+    reason.includes('responded 504') ||
+    reason.includes('failed to fetch') ||
+    reason.includes('fetch failed') ||
+    reason.includes('aborterror') ||
+    reason.includes('aborted') ||
+    reason.includes('timeout') ||
+    reason.includes('timed out')
+  );
+}
+
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
 type Weekday = (typeof WEEKDAYS)[number];
 type CalendarStatusFilter = 'all' | 'pending' | 'past';
@@ -252,7 +290,7 @@ export class AgendaService {
   private async requestTicketingArray<T>(baseUrl: string, path: string, authorization?: string): Promise<T[]> {
     const url = new URL(path, baseUrl);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), resolveInternalRequestTimeoutMs());
 
     try {
       const headers = buildInternalServiceHeaders({
@@ -283,10 +321,10 @@ export class AgendaService {
     try {
       return await this.requestTicketingArray<OwnedOrderSource>(this.ticketingBaseUrl, '/tickets/orders?limit=100', authorization);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'unknown error';
+      const reason = describeServiceRequestError(error);
       const canRetryThroughGateway =
         this.gatewayBaseUrl !== this.ticketingBaseUrl &&
-        (reason.includes('responded 401') || reason.includes('responded 403') || reason.includes('Failed to fetch') || reason.includes('fetch failed'));
+        isRetryableServiceRequestError(error);
 
       if (canRetryThroughGateway) {
         this.logger.warn(`Falling back to api-gateway for owned agenda orders after direct ticketing-service failure: ${reason}`);
@@ -302,10 +340,10 @@ export class AgendaService {
     try {
       return await this.requestTicketingArray<TicketTypeSource>(this.ticketingBaseUrl, '/tickets/types?includeInactive=true');
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'unknown error';
+      const reason = describeServiceRequestError(error);
       const canRetryThroughGateway =
         this.gatewayBaseUrl !== this.ticketingBaseUrl &&
-        (reason.includes('responded 401') || reason.includes('responded 403') || reason.includes('Failed to fetch') || reason.includes('fetch failed'));
+        isRetryableServiceRequestError(error);
 
       if (canRetryThroughGateway) {
         this.logger.warn(`Falling back to api-gateway for ticket types used in agenda ownership after direct ticketing-service failure: ${reason}`);
@@ -357,10 +395,10 @@ export class AgendaService {
     try {
       return await this.requestEventCalendarSources(this.eventServiceBaseUrl, limit);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'unknown error';
+      const reason = describeServiceRequestError(error);
       const canRetryThroughGateway =
         this.gatewayBaseUrl !== this.eventServiceBaseUrl &&
-        (reason.includes('responded 401') || reason.includes('responded 403') || reason.includes('Failed to fetch') || reason.includes('fetch failed'));
+        isRetryableServiceRequestError(error);
 
       if (canRetryThroughGateway) {
         this.logger.warn(`Falling back to api-gateway for agenda calendar after direct event-service failure: ${reason}`);
@@ -384,7 +422,7 @@ export class AgendaService {
     url.searchParams.set('limit', String(Math.max(1, Math.min(limit, 500))));
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), resolveInternalRequestTimeoutMs());
 
     try {
       const response = await fetch(url.toString(), {
