@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Favorite } from './favorite.entity';
@@ -17,7 +18,7 @@ function normalizeServiceBaseUrl(value: string | undefined, fallback: string) {
 }
 
 function buildInternalServiceHeaders(headers: Record<string, string> = {}) {
-  const normalized = { ...headers, 'x-forwarded-by': 'agenda-service' };
+  const normalized: Record<string, string> = { ...headers, 'x-forwarded-by': 'agenda-service' };
   const internalApiKey = String(process.env.INTERNAL_API_KEY ?? '').trim();
   if (internalApiKey) {
     normalized['x-internal-api-key'] = internalApiKey;
@@ -62,10 +63,27 @@ type CalendarOccurrence = {
   isArchived: boolean;
 };
 
+type AgendaViewerContext = {
+  userId: string | null;
+  role: string;
+  isAuthenticated: boolean;
+};
+
+type OwnedOrderSource = {
+  ticketTypeId?: string | null;
+  status?: string | null;
+};
+
+type TicketTypeSource = {
+  id?: string | null;
+  eventId?: string | null;
+};
+
 @Injectable()
 export class AgendaService {
   private readonly logger = new Logger(AgendaService.name);
   private readonly eventServiceBaseUrl = normalizeServiceBaseUrl(process.env.EVENT_SERVICE_URL, 'http://localhost:3001');
+  private readonly ticketingBaseUrl = normalizeServiceBaseUrl(process.env.TICKETING_SERVICE_URL, 'http://localhost:3002');
   private readonly gatewayBaseUrl = normalizeServiceBaseUrl(
     process.env.GATEWAY_BASE_URL ?? process.env.GATEWAY_URL,
     'http://localhost:3008',
@@ -76,6 +94,7 @@ export class AgendaService {
     private readonly sessionRepository: Repository<Session>,
     @InjectRepository(Favorite)
     private readonly favoriteRepository: Repository<Favorite>,
+    private readonly jwtService: JwtService,
   ) {}
 
   async createSession(data: Partial<Session>) {
@@ -191,6 +210,149 @@ export class AgendaService {
     return 'pending';
   }
 
+  private normalizeRole(role?: string): string {
+    const normalized = String(role ?? 'guest').trim().toLowerCase();
+    if (normalized === 'standar') {
+      return 'standard';
+    }
+    if (normalized === 'invitado') {
+      return 'guest';
+    }
+    return normalized;
+  }
+
+  private resolveViewerContext(authorization?: string): AgendaViewerContext {
+    const normalizedAuthorization = String(authorization ?? '').trim();
+    if (!normalizedAuthorization.startsWith('Bearer ')) {
+      return { userId: null, role: 'guest', isAuthenticated: false };
+    }
+
+    const token = normalizedAuthorization.slice('Bearer '.length);
+    const secret = process.env.JWT_SECRET ?? 'dev_only_change_me';
+
+    try {
+      const decoded = this.jwtService.verify(token, { secret }) as {
+        sub?: unknown;
+        accountType?: unknown;
+        role?: unknown;
+      };
+      const userId = String(decoded?.sub ?? '').trim();
+      return {
+        userId: userId || null,
+        role: this.normalizeRole(String(decoded?.accountType ?? decoded?.role ?? 'guest')),
+        isAuthenticated: true,
+      };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'token invalido';
+      this.logger.warn(`Ignoring agenda viewer token: ${reason}`);
+      return { userId: null, role: 'guest', isAuthenticated: false };
+    }
+  }
+
+  private async requestTicketingArray<T>(baseUrl: string, path: string, authorization?: string): Promise<T[]> {
+    const url = new URL(path, baseUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const headers = buildInternalServiceHeaders({
+        Accept: 'application/json',
+      });
+
+      if (authorization) {
+        headers.Authorization = authorization;
+      }
+
+      const response = await fetch(url.toString(), {
+        headers,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`${baseUrl} responded ${response.status}`);
+      }
+
+      const payload = await response.json().catch(() => []);
+      return Array.isArray(payload) ? (payload as T[]) : [];
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async fetchOwnedOrders(authorization: string): Promise<OwnedOrderSource[]> {
+    try {
+      return await this.requestTicketingArray<OwnedOrderSource>(this.ticketingBaseUrl, '/tickets/orders?limit=100', authorization);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      const canRetryThroughGateway =
+        this.gatewayBaseUrl !== this.ticketingBaseUrl &&
+        (reason.includes('responded 401') || reason.includes('responded 403') || reason.includes('Failed to fetch') || reason.includes('fetch failed'));
+
+      if (canRetryThroughGateway) {
+        this.logger.warn(`Falling back to api-gateway for owned agenda orders after direct ticketing-service failure: ${reason}`);
+        return await this.requestTicketingArray<OwnedOrderSource>(this.gatewayBaseUrl, '/tickets/orders?limit=100', authorization);
+      }
+
+      this.logger.error(`Unable to fetch owned agenda orders: ${reason}`);
+      throw new ServiceUnavailableException('No se pudieron consultar las compras del usuario');
+    }
+  }
+
+  private async fetchTicketTypeSources(): Promise<TicketTypeSource[]> {
+    try {
+      return await this.requestTicketingArray<TicketTypeSource>(this.ticketingBaseUrl, '/tickets/types?includeInactive=true');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      const canRetryThroughGateway =
+        this.gatewayBaseUrl !== this.ticketingBaseUrl &&
+        (reason.includes('responded 401') || reason.includes('responded 403') || reason.includes('Failed to fetch') || reason.includes('fetch failed'));
+
+      if (canRetryThroughGateway) {
+        this.logger.warn(`Falling back to api-gateway for ticket types used in agenda ownership after direct ticketing-service failure: ${reason}`);
+        return await this.requestTicketingArray<TicketTypeSource>(this.gatewayBaseUrl, '/tickets/types?includeInactive=true');
+      }
+
+      this.logger.error(`Unable to fetch ticket types for agenda ownership: ${reason}`);
+      throw new ServiceUnavailableException('No se pudieron resolver los eventos de los tickets del usuario');
+    }
+  }
+
+  private async getOwnedPurchasedEventIds(authorization: string): Promise<Set<string>> {
+    const normalizedAuthorization = String(authorization ?? '').trim();
+    if (!normalizedAuthorization.startsWith('Bearer ')) {
+      return new Set<string>();
+    }
+
+    const orders = await this.fetchOwnedOrders(normalizedAuthorization);
+    const purchasedTicketTypeIds = [...new Set(
+      orders
+        .filter((order) => {
+          const status = String(order?.status ?? 'paid').trim().toLowerCase();
+          return status === '' || status === 'paid' || status === 'succeeded' || status === 'approved';
+        })
+        .map((order) => String(order?.ticketTypeId ?? '').trim())
+        .filter(Boolean),
+    )];
+
+    if (purchasedTicketTypeIds.length === 0) {
+      return new Set<string>();
+    }
+
+    const ticketTypes = await this.fetchTicketTypeSources();
+    const ownedTicketTypeIds = new Set(purchasedTicketTypeIds);
+    const eventIds = new Set<string>();
+
+    for (const ticketType of ticketTypes) {
+      const ticketTypeId = String(ticketType?.id ?? '').trim();
+      const eventId = String(ticketType?.eventId ?? '').trim();
+      if (ticketTypeId && eventId && ownedTicketTypeIds.has(ticketTypeId)) {
+        eventIds.add(eventId);
+      }
+    }
+
+    return eventIds;
+  }
+
   private async fetchEventCalendarSources(limit = 200): Promise<EventCalendarSource[]> {
     try {
       return await this.requestEventCalendarSources(this.eventServiceBaseUrl, limit);
@@ -301,7 +463,7 @@ export class AgendaService {
     return items;
   }
 
-  async getCalendarData(params: { start?: string; end?: string; status?: string }) {
+  async getCalendarData(params: { start?: string; end?: string; status?: string }, authorization?: string) {
     const start = this.dateOnlyFromUnknown(params.start ?? new Date(), 'start');
     const end = this.dateOnlyFromUnknown(params.end ?? start, 'end');
     const startDate = this.parseDateOnly(start);
@@ -312,7 +474,36 @@ export class AgendaService {
     }
 
     const status = this.normalizeStatusFilter(params.status);
-    const events = await this.fetchEventCalendarSources();
+    const emptyResult = {
+      range: { start, end },
+      status,
+      totals: {
+        events: 0,
+        occurrences: 0,
+        visible: 0,
+        pending: 0,
+        active: 0,
+        past: 0,
+        days: 0,
+      },
+      items: [] as CalendarOccurrence[],
+    };
+
+    const viewer = this.resolveViewerContext(authorization);
+    let events = await this.fetchEventCalendarSources();
+
+    if (viewer.isAuthenticated && viewer.role === 'standard') {
+      const ownedEventIds = await this.getOwnedPurchasedEventIds(authorization ?? '');
+      if (ownedEventIds.size === 0) {
+        return emptyResult;
+      }
+
+      events = events.filter((event) => ownedEventIds.has(String(event.id || '').trim()));
+      if (events.length === 0) {
+        return emptyResult;
+      }
+    }
+
     const allItems: CalendarOccurrence[] = [];
 
     for (const event of events) {

@@ -1,9 +1,15 @@
+import { config as loadEnv } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
 import { randomUUID } from 'crypto';
-import { AppModule } from './app.module';
+import { resolve } from 'path';
 import { GatewayProxyService } from './gateway-proxy.service';
 import { GATEWAY_PROXY_PREFIXES } from './gateway.constants';
 import * as prometheus from 'prom-client';
+
+const express = require('express');
+
+loadEnv({ path: resolve(process.cwd(), '.env') });
+loadEnv({ path: resolve(process.cwd(), '..', '.env'), override: false });
 
 const register = new prometheus.Registry();
 
@@ -24,9 +30,14 @@ const httpRequestTotal = new prometheus.Counter({
 prometheus.collectDefaultMetrics({ register });
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const { AppModule } = await import('./app.module');
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   const server = app.getHttpAdapter().getInstance();
   const gatewayProxyService = app.get(GatewayProxyService);
+  const requestBodyLimit = String(process.env.REQUEST_BODY_LIMIT || '6mb').trim() || '6mb';
+
+  server.use(express.json({ limit: requestBodyLimit }));
+  server.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
   app.use((req: any, res: any, next: any) => {
     const correlationId = req.headers['x-correlation-id'] ?? randomUUID();

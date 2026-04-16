@@ -44,7 +44,15 @@ describe('TicketController', () => {
 
     const result = await controller.createTicketType(
       { user: { sub: 'admin-1', name: 'Admin', email: 'admin@mail.com' } },
-      { name: 'VIP', price: 50, quantity: 100, eventId: 'event-1', category: 'premium', maxPerPerson: 4 },
+      {
+        name: 'VIP',
+        price: 50,
+        quantity: 100,
+        eventId: 'event-1',
+        category: 'premium',
+        maxPerPerson: 4,
+        teamImageUrl: 'data:image/png;base64,abc123',
+      },
     );
 
     expect(ticketService.createTicketType).toHaveBeenCalledWith({
@@ -54,6 +62,7 @@ describe('TicketController', () => {
       eventId: 'event-1',
       category: 'premium',
       maxPerPerson: 4,
+      teamImageUrl: 'data:image/png;base64,abc123',
       organizerId: 'admin-1',
       organizerName: 'Admin',
       organizerEmail: 'admin@mail.com',

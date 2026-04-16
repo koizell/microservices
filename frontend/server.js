@@ -3,10 +3,13 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.resolve(__dirname);
+require("dotenv").config({ path: path.join(root, ".env") });
+
 const indexFilePath = path.join(root, "views", "index.html");
 const port = Number(process.env.PORT || 3009);
 const gatewayBaseUrl = normalizeBaseUrl(
   process.env.GATEWAY_BASE_URL || process.env.GATEWAY_URL || "http://localhost:3008",
+  "http",
 );
 const proxyPrefixes = [
   "/gateway",
@@ -45,10 +48,13 @@ const mimeTypes = {
   ".webp": "image/webp",
 };
 
-function normalizeBaseUrl(value) {
+function normalizeBaseUrl(value, defaultProtocol) {
   return String(value || "")
     .trim()
-    .replace(/\/+$/, "");
+    .replace(/\/+$/, "")
+    .replace(/^(?!https?:\/\/)/i, function (candidate) {
+      return candidate ? `${defaultProtocol || "http"}://` : "";
+    });
 }
 
 function isProxyRequest(requestPath) {
@@ -94,6 +100,19 @@ async function readRequestBody(request) {
   return Buffer.concat(chunks);
 }
 
+async function sendUpstreamResponse(response, upstream) {
+  response.statusCode = upstream.status;
+
+  upstream.headers.forEach(function (value, key) {
+    if (blockedResponseHeaders.has(String(key).toLowerCase())) {
+      return;
+    }
+    response.setHeader(key, value);
+  });
+
+  response.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
 async function proxyRequest(request, response) {
   try {
     const upstream = await fetch(buildProxyUrl(request), {
@@ -103,22 +122,13 @@ async function proxyRequest(request, response) {
       redirect: "manual",
     });
 
-    response.statusCode = upstream.status;
-
-    upstream.headers.forEach(function (value, key) {
-      if (blockedResponseHeaders.has(String(key).toLowerCase())) {
-        return;
-      }
-      response.setHeader(key, value);
-    });
-
-    response.end(Buffer.from(await upstream.arrayBuffer()));
+    await sendUpstreamResponse(response, upstream);
   } catch (error) {
     response.statusCode = 502;
     response.setHeader("Content-Type", "application/json; charset=utf-8");
     response.end(
       JSON.stringify({
-        message: "No se pudo contactar el API Gateway desde el frontend local",
+        message: "No se pudo contactar el API Gateway local. Inicia microservices/api-gateway en localhost:3008 y, para login, tambien microservices/user-service en localhost:3000.",
         reason: error instanceof Error ? error.message : "Error desconocido",
       }),
     );

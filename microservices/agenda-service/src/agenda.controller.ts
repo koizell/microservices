@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, Param, Post, Query } from '@nestjs/common';
 import { AgendaService } from './agenda.service';
 
 @Controller('agenda')
@@ -21,8 +21,9 @@ export class AgendaController {
     @Query('start') start?: string,
     @Query('end') end?: string,
     @Query('status') status?: string,
+    @Headers('authorization') authorization?: string,
   ) {
-    return await this.agendaService.getCalendarData({ start, end, status });
+    return await this.agendaService.getCalendarData({ start, end, status }, authorization);
   }
 
   @Post('sessions/data')

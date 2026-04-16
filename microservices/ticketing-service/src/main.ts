@@ -4,6 +4,8 @@ import { randomUUID } from 'crypto';
 import { resolve } from 'path';
 import * as prometheus from 'prom-client';
 
+const express = require('express');
+
 loadEnv({ path: resolve(process.cwd(), '.env') });
 loadEnv({ path: resolve(process.cwd(), '..', '.env'), override: false });
 
@@ -50,8 +52,12 @@ function isPublicServicePath(pathname: string) {
 
 async function bootstrap() {
   const { AppModule } = await import('./app.module');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   const server = app.getHttpAdapter().getInstance();
+  const requestBodyLimit = String(process.env.REQUEST_BODY_LIMIT || '6mb').trim() || '6mb';
+
+  server.use(express.json({ limit: requestBodyLimit }));
+  server.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
   app.use((req: any, res: any, next: any) => {
     const correlationId = req.headers['x-correlation-id'] ?? randomUUID();

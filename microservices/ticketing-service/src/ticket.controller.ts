@@ -1,7 +1,10 @@
+import { readFileSync } from 'fs';
 import { BadRequestException, Body, Controller, Delete, Get, Header, Param, ParseUUIDPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { TicketService } from './ticket.service';
 import { RoleGuard } from './guards/role.guard';
 import { Roles } from './decorators/roles.decorator';
+
+const HEIC2ANY_BROWSER_BUNDLE = readFileSync(require.resolve('heic2any/dist/heic2any.min.js'), 'utf8');
 
 @Controller('tickets')
 export class TicketController {
@@ -28,6 +31,12 @@ export class TicketController {
   @Header('Content-Type', 'text/html; charset=utf-8')
   renderOrganizerUi() {
     return this.renderUiByRole('admin');
+  }
+
+  @Get('assets/heic2any.min.js')
+  @Header('Content-Type', 'application/javascript; charset=utf-8')
+  renderHeic2AnyBrowserBundle() {
+    return HEIC2ANY_BROWSER_BUNDLE;
   }
 
   @Get('staff')
@@ -262,7 +271,7 @@ export class TicketController {
     .card h2{margin:0 0 12px;font-size:18px}
     .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
     .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-    input,select,button{
+    input,select,button,.typeImagePicker{
       height:40px;border-radius:10px;border:1px solid #c8d4e6;padding:0 11px;
       font:inherit;font-size:14px
     }
@@ -279,20 +288,104 @@ export class TicketController {
     table{width:100%;border-collapse:collapse;margin-top:10px}
     th,td{padding:9px 8px;border-bottom:1px solid #edf2f8;text-align:left;font-size:13px}
     th{font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:#64748b}
+    .typeEditor{display:grid;gap:12px;margin-top:12px;padding:14px;border:1px solid #e7edf7;border-radius:16px;background:linear-gradient(180deg,#fff 0%,#f8fbff 100%)}
+    .typeEditorHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .typeEditorTitle{display:grid;gap:4px}
+    .typeEditorTitle h3{margin:0;font-size:17px;letter-spacing:-.01em}
+    .typeEditorActions{display:flex;gap:8px;flex-wrap:wrap}
+    .typeImageRow{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px;align-items:center;padding:12px;border:1px solid #e7edf7;border-radius:14px;background:#fff}
+    .typeImagePreview{width:132px;height:96px;border-radius:14px;border:1px solid #dbe5f3;background:linear-gradient(160deg,#dbeafe 0%,#eff6ff 55%,#f8fafc 100%);overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center;color:#64748b;font-weight:800;font-size:12px;line-height:1.4;padding:8px;cursor:pointer}
+    .typeImagePreview img{width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;object-position:center;display:block;margin:0 auto}
+    .typeImagePreview.empty img{display:none}
+    .typeImagePreview.is-wide{padding:6px}
+    .typeImagePreview.is-wide img{width:100%;height:auto;max-height:100%}
+    .typeImagePreview.is-tall{padding:6px 20px}
+    .typeImagePreview.is-tall img{width:auto;height:100%;max-width:100%}
+    .typeImagePreview.is-square{padding:8px 12px}
+    .typeImageInput{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
+    .typeImageControls{display:grid;gap:8px;min-width:0}
+    .typeImageToolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .typeImagePicker{display:inline-flex;align-items:center;justify-content:center;min-width:132px;text-decoration:none;background:#fff;color:#1e3a8a;border:1px solid #bfdbfe;font-weight:800;cursor:pointer}
+    .typeImageFileName{min-width:0;font-size:13px;color:#475569;font-weight:600;word-break:break-word}
+    .typeImageButtons{display:flex;gap:8px;flex-wrap:wrap}
+    .typeImageButtons button[disabled]{opacity:.55;cursor:not-allowed}
+    .typeOverview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:16px}
+    .typeOverviewItem{padding:12px 14px;border:1px solid #dbe5f3;border-radius:14px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);display:grid;gap:4px}
+    .typeOverviewItem strong{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em}
+    .typeOverviewItem span{font-size:22px;font-weight:800;color:#0f172a;line-height:1}
+    .typeCards{display:grid;gap:14px;margin-top:16px}
+    .typeCard{display:grid;grid-template-columns:minmax(280px,320px) minmax(0,1fr);gap:18px;align-items:stretch;padding:16px;border:1px solid #dde6f2;border-radius:18px;background:#fff;box-shadow:0 10px 22px rgba(15,23,42,.06)}
+    .typeCard.archived{opacity:.84}
+    .typeCardMedia{position:relative;min-height:252px;height:100%;border-radius:18px;overflow:hidden;border:1px solid #d6e4ff;background:linear-gradient(160deg,#dbeafe 0%,#f8fafc 100%);display:flex;align-items:center;justify-content:center;padding:14px}
+    .typeCardMedia img{width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;object-position:center;display:block;margin:0 auto}
+    .typeCardMedia.is-wide{min-height:220px;padding:10px 8px}
+    .typeCardMedia.is-wide img{width:100%;height:auto;max-height:100%}
+    .typeCardMedia.is-tall{min-height:300px;padding:10px 30px}
+    .typeCardMedia.is-tall img{width:auto;height:100%;max-width:100%}
+    .typeCardMedia.is-square{padding:14px 18px}
+    .typeCardFallback{width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:18px;text-align:center;color:#64748b;font-weight:800;line-height:1.5}
+    .typeCardBody{display:grid;gap:14px;min-width:0;align-content:start}
+    .typeCardHead{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:flex-start;gap:12px}
+    .typeCardTitleWrap{display:grid;gap:6px;min-width:0}
+    .typeCardTitle{margin:0;font-size:24px;line-height:1.05;letter-spacing:-.03em;word-break:break-word}
+    .typeCardSubtitle{font-size:13px;color:#64748b;line-height:1.5}
+    .typeMetaRow{display:flex;gap:8px;flex-wrap:wrap}
+    .typeChip{display:inline-flex;align-items:center;justify-content:center;min-height:28px;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;max-width:100%}
+    .typeChip.event{background:#e0ecff;color:#1d4ed8}
+    .typeChip.category{background:#fef3c7;color:#92400e}
+    .typeChip.stock-ok{background:#dcfce7;color:#166534}
+    .typeChip.stock-low{background:#fee2e2;color:#b45309}
+    .typeChip.stock-empty{background:#fee2e2;color:#b91c1c}
+    .typeChip.archived{background:#e5e7eb;color:#374151}
+    .typeCardPriceWrap{display:grid;gap:8px;justify-items:end}
+    .typeCardPrice{font-size:26px;font-weight:800;color:#1e3a8a;line-height:1}
+    .typeStatus{display:inline-flex;align-items:center;justify-content:center;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.03em;text-transform:uppercase}
+    .typeStatus.active{background:#dcfce7;color:#166534}
+    .typeStatus.archived{background:#e5e7eb;color:#374151}
+    .typeAvailability{display:grid;gap:8px;padding:12px 14px;border:1px solid #e5edf8;border-radius:14px;background:linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)}
+    .typeAvailabilityHead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+    .typeAvailabilityLabel{font-size:13px;color:#475569;font-weight:700}
+    .typeAvailabilityValue{font-size:12px;color:#64748b;font-weight:700}
+    .typeAvailabilityBar{height:10px;border-radius:999px;background:#e2e8f0;overflow:hidden}
+    .typeAvailabilityFill{height:100%;border-radius:999px;background:linear-gradient(90deg,#22c55e 0%,#16a34a 100%)}
+    .typeAvailabilityFill.low{background:linear-gradient(90deg,#f59e0b 0%,#d97706 100%)}
+    .typeAvailabilityFill.empty{background:linear-gradient(90deg,#ef4444 0%,#dc2626 100%)}
+    .typeAvailabilityFill.archived{background:linear-gradient(90deg,#94a3b8 0%,#64748b 100%)}
+    .typeCardDetails{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
+    .typeStats{display:grid;grid-template-columns:1fr;gap:8px}
+    .typeStat{padding:11px 12px;border:1px solid #e8eef8;border-radius:12px;background:#f8fafc;display:grid;gap:4px}
+    .typeStat strong{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em}
+    .typeStat span{font-size:15px;color:#0f172a;line-height:1.35;word-break:break-word}
+    .typeInfoGrid{display:grid;grid-template-columns:1fr;gap:8px}
+    .typeCardActions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+    .emptyTypeState{padding:18px;border:1px dashed #bfd0ea;border-radius:16px;background:#f8fbff;color:#64748b;font-size:14px}
     .small{font-size:12px;color:var(--muted)}
     .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
     .kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}
     .kpi .label{font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.03em}
     .kpi .value{margin-top:6px;font-size:24px;font-weight:800}
 
+    @media(max-width:1180px){
+      .typeCard{grid-template-columns:minmax(250px,280px) minmax(0,1fr)}
+    }
     @media(max-width:980px){
       .grid,.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
       .grid-2{grid-template-columns:1fr}
+      .typeOverview{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .typeCard{grid-template-columns:1fr}
+      .typeCardMedia{min-height:220px;padding:10px}
+      .typeCardMedia.is-tall{min-height:260px;padding:10px 22px}
+      .typeCardHead,.typeCardDetails{grid-template-columns:1fr}
+      .typeImageRow{grid-template-columns:1fr}
+      .typeImagePreview{width:100%;max-width:172px}
     }
     @media(max-width:640px){
       .grid,.kpis{grid-template-columns:1fr}
+      .typeOverview{grid-template-columns:1fr}
       .top{flex-direction:column;align-items:flex-start}
       .badges{justify-content:flex-start}
+      .typeStats,.typeInfoGrid{grid-template-columns:1fr}
+      .typeCardPriceWrap,.typeCardActions{justify-items:start;justify-content:flex-start}
     }
   </style>
 </head>
@@ -316,38 +409,50 @@ export class TicketController {
       <div class="card">
         <h2>Tipos de Ticket</h2>
         <div id="catalogMsg" class="msg"></div>
-        <div class="grid" id="createTypeForm">
-          <input id="typeName" placeholder="Nombre (General, VIP, Taller)">
-          <input id="typePrice" type="number" min="1" step="0.01" placeholder="Precio">
-          <input id="typeQty" type="number" min="1" step="1" placeholder="Cantidad total">
-          <input id="typeMaxPerson" type="number" min="0" step="1" placeholder="Max por persona (0 = sin limite)">
-          <div style="display:flex;gap:8px">
-            <button class="primary" style="flex:1" onclick="createType()">Crear tipo</button>
-            <button class="ghost" onclick="loadTypes()">Recargar</button>
+        <div id="createTypeForm" class="typeEditor">
+          <input id="editingTypeId" type="hidden">
+          <div class="typeEditorHead">
+            <div class="typeEditorTitle">
+              <h3 id="typeFormTitle">Crear tipo de ticket</h3>
+              <div class="small">Solo organizadores pueden crear, editar y cambiar la foto del equipo.</div>
+            </div>
+            <div class="typeEditorActions">
+              <button id="saveTypeBtn" class="primary" type="button" onclick="createType()">Crear tipo</button>
+              <button id="cancelTypeBtn" class="ghost" type="button" onclick="resetTypeForm()" style="display:none">Cancelar edicion</button>
+              <button class="ghost" type="button" onclick="loadTypes()">Recargar</button>
+            </div>
           </div>
-          <select id="typeEventId" style="height:40px;border-radius:10px;border:1px solid #c8d4e6;padding:0 11px;font:inherit;font-size:14px">
-            <option value="">-- Sin evento --</option>
-          </select>
-          <input id="typeLocation" placeholder="Ubicación del evento (auto)" readonly style="background:#f8fafc;color:#64748b">
-          <input id="typeCategory" placeholder="Categoria (opcional)">
+          <div class="grid">
+            <input id="typeName" placeholder="Nombre (General, VIP, Taller)">
+            <input id="typePrice" type="number" min="1" step="0.01" placeholder="Precio">
+            <input id="typeQty" type="number" min="1" step="1" placeholder="Cantidad total">
+            <input id="typeMaxPerson" type="number" min="0" step="1" placeholder="Max por persona (0 = sin limite)">
+            <select id="typeEventId" style="height:40px;border-radius:10px;border:1px solid #c8d4e6;padding:0 11px;font:inherit;font-size:14px">
+              <option value="">-- Sin evento --</option>
+            </select>
+            <input id="typeLocation" placeholder="Ubicacion del evento (auto)" readonly style="background:#f8fafc;color:#64748b">
+            <input id="typeCategory" placeholder="Categoria (opcional)">
+          </div>
+          <div class="typeImageRow">
+            <label id="typeImagePreview" class="typeImagePreview empty" for="typeImageFile">
+              <img id="typeImagePreviewImg" alt="Imagen del equipo">
+              <span id="typeImagePreviewText">Sin foto guardada</span>
+            </label>
+            <div class="typeImageControls">
+              <input id="typeImageFile" class="typeImageInput" type="file" accept=".jpg,.jpeg,.png,.webp,.svg,.heic,.heif,image/jpeg,image/png,image/webp,image/svg+xml,image/heic,image/heif">
+              <div class="typeImageToolbar">
+                <label class="typeImagePicker" for="typeImageFile">Elegir foto</label>
+                <div id="typeImageFileName" class="typeImageFileName">Ningun archivo seleccionado.</div>
+              </div>
+              <div id="typeImageState" class="small">JPG, PNG, WebP, SVG o HEIC/HEIF. Convertimos HEIC localmente y ajustamos resolucion, peso y encuadre automaticamente cuando eliges la foto.</div>
+              <div class="typeImageButtons">
+                <button id="removeTypeImageBtn" class="ghost" type="button" onclick="removeTypeImage()" disabled>Quitar foto</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Precio</th>
-              <th>Vendidos</th>
-              <th>Disponibles</th>
-              <th>Max/persona</th>
-              <th>Evento</th>
-              <th>Ubicación</th>
-              <th>Categoria</th>
-              <th>Estado</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="typesRows"></tbody>
-        </table>
+        <div id="typesOverview" class="typeOverview"></div>
+        <div id="typesCards" class="typeCards"></div>
       </div>
     </section>
 
@@ -416,6 +521,7 @@ export class TicketController {
 
   </div>
 
+  <script src="/tickets/assets/heic2any.min.js"></script>
   <script>
     const FORCED_ROLE = '${forcedRole}';
     const HOST_NAME = window.location.hostname || 'localhost';
@@ -493,6 +599,10 @@ export class TicketController {
     let userRole = 'guest';
     let typesCache = [];
     let eventsCache = [];
+    let currentTypeImageData = '';
+    const MAX_TICKET_IMAGE_SIZE = 1800000;
+    const DEFAULT_TYPE_IMAGE_HELP = 'JPG, PNG, WebP, SVG o HEIC/HEIF. Convertimos HEIC localmente y ajustamos resolucion, peso y encuadre de fotos verticales o panoramicas automaticamente al subirla; luego se guarda cuando creas o actualizas el ticket.';
+    const EMPTY_SAVED_IMAGE_HELP = 'Este ticket aun no tiene una foto guardada. Elige una y guarda los cambios.';
 
     function canAccessTab(tab) {
       if (userRole === 'admin') {
@@ -691,6 +801,602 @@ export class TicketController {
       el.textContent = message || '';
     }
 
+    function clearTicketImageFrameClass(frame) {
+      if (!frame) {
+        return;
+      }
+      frame.classList.remove('is-wide', 'is-tall', 'is-square');
+    }
+
+    function applyTicketImageFrameClass(frame, image) {
+      if (!frame || !image) {
+        return;
+      }
+
+      const width = Number(image.naturalWidth || image.width || 0);
+      const height = Number(image.naturalHeight || image.height || 0);
+      clearTicketImageFrameClass(frame);
+      if (!width || !height) {
+        return;
+      }
+
+      const ratio = width / height;
+      if (ratio >= 1.7) {
+        frame.classList.add('is-wide');
+        return;
+      }
+      if (ratio <= 0.82) {
+        frame.classList.add('is-tall');
+        return;
+      }
+      frame.classList.add('is-square');
+    }
+
+    function renderTypeImagePreview(imageUrl) {
+      const preview = document.getElementById('typeImagePreview');
+      const image = document.getElementById('typeImagePreviewImg');
+      const text = document.getElementById('typeImagePreviewText');
+      const removeButton = document.getElementById('removeTypeImageBtn');
+      if (!preview || !image || !text) {
+        return;
+      }
+
+      if (imageUrl) {
+        preview.classList.remove('empty');
+        clearTicketImageFrameClass(preview);
+        image.onload = function() {
+          applyTicketImageFrameClass(preview, image);
+        };
+        image.onerror = function() {
+          clearTicketImageFrameClass(preview);
+        };
+        image.src = imageUrl;
+        if (image.complete) {
+          applyTicketImageFrameClass(preview, image);
+        }
+        image.style.display = 'block';
+        text.style.display = 'none';
+        if (removeButton) {
+          removeButton.disabled = false;
+        }
+        return;
+      }
+
+      preview.classList.add('empty');
+      clearTicketImageFrameClass(preview);
+      image.removeAttribute('src');
+      image.style.display = 'none';
+      text.style.display = 'block';
+      if (removeButton) {
+        removeButton.disabled = true;
+      }
+    }
+
+    function setTypeImageControls(fileName, helperText) {
+      const fileNameNode = document.getElementById('typeImageFileName');
+      const stateNode = document.getElementById('typeImageState');
+      const removeButton = document.getElementById('removeTypeImageBtn');
+      if (fileNameNode) {
+        fileNameNode.textContent = fileName || 'Ningun archivo seleccionado.';
+      }
+      if (stateNode) {
+        stateNode.textContent = helperText || DEFAULT_TYPE_IMAGE_HELP;
+      }
+      if (removeButton) {
+        removeButton.disabled = !currentTypeImageData;
+      }
+    }
+
+    function openTypeImagePicker() {
+      if (userRole !== 'admin') {
+        return;
+      }
+      const input = document.getElementById('typeImageFile');
+      if (input) {
+        input.click();
+      }
+    }
+
+    function syncTypeLocationFromSelectedEvent() {
+      const select = document.getElementById('typeEventId');
+      const location = document.getElementById('typeLocation');
+      if (!select || !location) {
+        return;
+      }
+      const option = select.options[select.selectedIndex];
+      location.value = option && option.value ? (option.dataset.location || '') : '';
+    }
+
+    function resetTypeForm(options) {
+      const config = options || {};
+      document.getElementById('editingTypeId').value = '';
+      document.getElementById('typeFormTitle').textContent = 'Crear tipo de ticket';
+      document.getElementById('saveTypeBtn').textContent = 'Crear tipo';
+      document.getElementById('cancelTypeBtn').style.display = 'none';
+      document.getElementById('typeName').value = '';
+      document.getElementById('typePrice').value = '';
+      document.getElementById('typeQty').value = '';
+      document.getElementById('typeMaxPerson').value = '';
+      document.getElementById('typeEventId').value = '';
+      document.getElementById('typeCategory').value = '';
+      document.getElementById('typeImageFile').value = '';
+      currentTypeImageData = '';
+      renderTypeImagePreview('');
+      setTypeImageControls('', DEFAULT_TYPE_IMAGE_HELP);
+      syncTypeLocationFromSelectedEvent();
+      if (!config.keepMessage) {
+        setMsg('catalogMsg', '', 'info');
+      }
+    }
+
+    function createInfoBlock(label, value) {
+      const block = document.createElement('div');
+      block.className = 'typeStat';
+      const title = document.createElement('strong');
+      title.textContent = label;
+      const content = document.createElement('span');
+      content.textContent = value;
+      block.appendChild(title);
+      block.appendChild(content);
+      return block;
+    }
+
+    function createTypeChip(label, className) {
+      const chip = document.createElement('span');
+      chip.className = 'typeChip ' + className;
+      chip.textContent = label;
+      return chip;
+    }
+
+    function getAvailabilityState(ticketType) {
+      const total = Math.max(0, Number(ticketType.quantity || 0));
+      const sold = Math.max(0, Number(ticketType.quantitySold || 0));
+      const available = Math.max(0, total - sold);
+      const ratio = total > 0 ? (available / total) : 0;
+      const isActive = ticketType.isActive !== false;
+
+      if (!isActive) {
+        return {
+          total: total,
+          sold: sold,
+          available: available,
+          ratioPercent: Math.max(0, Math.min(100, Math.round(ratio * 100))),
+          chipClass: 'archived',
+          barClass: 'archived',
+          label: 'Archivado',
+        };
+      }
+
+      if (available <= 0) {
+        return {
+          total: total,
+          sold: sold,
+          available: available,
+          ratioPercent: 0,
+          chipClass: 'stock-empty',
+          barClass: 'empty',
+          label: 'Agotado',
+        };
+      }
+
+      if (available <= Math.max(2, Math.ceil(total * 0.2))) {
+        return {
+          total: total,
+          sold: sold,
+          available: available,
+          ratioPercent: Math.max(6, Math.min(100, Math.round(ratio * 100))),
+          chipClass: 'stock-low',
+          barClass: 'low',
+          label: 'Ultimos cupos',
+        };
+      }
+
+      return {
+        total: total,
+        sold: sold,
+        available: available,
+        ratioPercent: Math.max(8, Math.min(100, Math.round(ratio * 100))),
+        chipClass: 'stock-ok',
+        barClass: '',
+        label: 'Disponible',
+      };
+    }
+
+    function renderTypesOverview(list) {
+      const container = document.getElementById('typesOverview');
+      if (!container) {
+        return;
+      }
+
+      const items = Array.isArray(list) ? list : [];
+      const total = items.length;
+      const active = items.filter(function(item) { return item.isActive !== false; }).length;
+      const archived = items.filter(function(item) { return item.isActive === false; }).length;
+      const soldOut = items.filter(function(item) {
+        const availability = getAvailabilityState(item);
+        return item.isActive !== false && availability.available <= 0;
+      }).length;
+
+      const summary = [
+        { label: 'Total tipos', value: total },
+        { label: 'Activos', value: active },
+        { label: 'Agotados', value: soldOut },
+        { label: 'Archivados', value: archived },
+      ];
+
+      container.innerHTML = '';
+      summary.forEach(function(entry) {
+        const card = document.createElement('div');
+        card.className = 'typeOverviewItem';
+        const label = document.createElement('strong');
+        label.textContent = entry.label;
+        const value = document.createElement('span');
+        value.textContent = String(entry.value);
+        card.appendChild(label);
+        card.appendChild(value);
+        container.appendChild(card);
+      });
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise(function(resolve, reject) {
+        const reader = new FileReader();
+        reader.onload = function() { resolve(String(reader.result || '')); };
+        reader.onerror = function() { reject(new Error('No se pudo leer la imagen seleccionada.')); };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function resolveHeicTicketConverter() {
+      if (typeof window.heic2any === 'function') {
+        return window.heic2any;
+      }
+      if (typeof heic2any === 'function') {
+        return heic2any;
+      }
+      return null;
+    }
+
+    function isHeicTicketImageFile(file) {
+      const normalizedType = String(file && file.type ? file.type : '').trim().toLowerCase();
+      const normalizedName = String(file && file.name ? file.name : '').trim().toLowerCase();
+      return normalizedType === 'image/heic'
+        || normalizedType === 'image/heif'
+        || normalizedName.endsWith('.heic')
+        || normalizedName.endsWith('.heif');
+    }
+
+    function isSupportedTicketImageFile(file) {
+      const normalizedType = String(file && file.type ? file.type : '').trim().toLowerCase();
+      const normalizedName = String(file && file.name ? file.name : '').trim().toLowerCase();
+      if (['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'image/heic', 'image/heif'].includes(normalizedType)) {
+        return true;
+      }
+      return /\.(jpg|jpeg|png|webp|svg|heic|heif)$/i.test(normalizedName);
+    }
+
+    async function convertHeicTicketImageFile(file) {
+      const converter = resolveHeicTicketConverter();
+      if (typeof converter !== 'function') {
+        throw new Error('La conversion HEIC local aun no esta lista. Recarga la vista e intenta de nuevo.');
+      }
+
+      let converted = null;
+      try {
+        converted = await converter({
+          blob: file,
+          toType: 'image/jpeg',
+          quality: 0.92,
+        });
+      } catch (_error) {
+        throw new Error('No se pudo convertir la imagen HEIC/HEIF automaticamente. Prueba con otra foto o conviertela a JPG/PNG.');
+      }
+
+      const candidate = Array.isArray(converted) ? converted[0] : converted;
+      if (!(candidate instanceof Blob)) {
+        throw new Error('La imagen HEIC/HEIF no se pudo convertir a un formato compatible.');
+      }
+
+      return candidate.type ? candidate : new Blob([candidate], { type: 'image/jpeg' });
+    }
+
+    function renderTicketImageCandidate(image, maxEdge, quality) {
+      const width = Number(image.width || 1);
+      const height = Number(image.height || 1);
+      const scale = Math.min(1, maxEdge / Math.max(width, height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('No se pudo procesar la imagen.');
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', quality);
+    }
+
+    async function optimizeTypeImageFile(file) {
+      let sourceBlob = file;
+      let normalizedType = String(file.type || '').toLowerCase();
+
+      if (isHeicTicketImageFile(file)) {
+        sourceBlob = await convertHeicTicketImageFile(file);
+        normalizedType = 'image/jpeg';
+      }
+
+      const source = await readFileAsDataUrl(sourceBlob);
+      if (normalizedType === 'image/svg+xml') {
+        if (source.length > MAX_TICKET_IMAGE_SIZE) {
+          throw new Error('La imagen SVG es demasiado pesada. Exportala mas ligera o usa PNG/JPG.');
+        }
+        return source;
+      }
+
+      return await new Promise(function(resolve, reject) {
+        const image = new Image();
+        image.onload = function() {
+          try {
+            const longestEdge = Math.max(Number(image.width || 1), Number(image.height || 1));
+            let maxEdge = Math.min(longestEdge, 1600);
+            let quality = 0.9;
+            let bestCandidate = '';
+
+            for (let attempt = 0; attempt < 8; attempt += 1) {
+              const candidate = renderTicketImageCandidate(image, maxEdge, quality);
+              bestCandidate = candidate;
+              if (candidate.length <= MAX_TICKET_IMAGE_SIZE) {
+                resolve(candidate);
+                return;
+              }
+
+              if (maxEdge <= 320 && quality <= 0.55) {
+                break;
+              }
+
+              maxEdge = Math.max(320, Math.round(maxEdge * 0.82));
+              quality = Math.max(0.55, Number((quality - 0.08).toFixed(2)));
+            }
+
+            if (bestCandidate && bestCandidate.length <= MAX_TICKET_IMAGE_SIZE) {
+              resolve(bestCandidate);
+              return;
+            }
+
+            reject(new Error('No se pudo adaptar la imagen automaticamente. Prueba con una foto mas ligera o recortada.'));
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error('No se pudo procesar la imagen.'));
+          }
+        };
+        image.onerror = function() { reject(new Error('No se pudo procesar la imagen seleccionada.')); };
+        image.src = source;
+      });
+    }
+
+    async function handleTypeImageChange(event) {
+      const input = event && event.target ? event.target : document.getElementById('typeImageFile');
+      const file = input && input.files ? input.files[0] : null;
+      if (!file) {
+        return;
+      }
+      if (!isSupportedTicketImageFile(file)) {
+        input.value = '';
+        setTypeImageControls(currentTypeImageData ? 'Imagen actual preparada.' : '', currentTypeImageData ? 'Se mantiene la imagen actual. Elige JPG, PNG, WebP o SVG.' : DEFAULT_TYPE_IMAGE_HELP);
+        setMsg('catalogMsg', 'Selecciona un archivo de imagen valido.', 'err');
+        return;
+      }
+
+      const previousImage = currentTypeImageData;
+      try {
+        const isHeicSelection = isHeicTicketImageFile(file);
+        setTypeImageControls(file.name || 'Foto seleccionada.', isHeicSelection ? 'Convirtiendo HEIC/HEIF a JPG y ajustando la foto para la card...' : 'Ajustando resolucion y peso de la foto para la card...');
+        setMsg('catalogMsg', isHeicSelection ? 'Convirtiendo foto HEIC/HEIF para la tarjeta...' : 'Preparando foto para la tarjeta...', 'info');
+        const optimizedImage = await optimizeTypeImageFile(file);
+        if (optimizedImage.length > MAX_TICKET_IMAGE_SIZE) {
+          throw new Error('La imagen es demasiado grande. Usa una foto mas ligera.');
+        }
+        currentTypeImageData = optimizedImage;
+        renderTypeImagePreview(currentTypeImageData);
+        setTypeImageControls(file.name || 'Foto preparada.', document.getElementById('editingTypeId').value.trim() ? 'Foto optimizada. Pulsa Guardar cambios para persistirla.' : 'Foto optimizada. Pulsa Crear tipo para persistirla.');
+        setMsg('catalogMsg', document.getElementById('editingTypeId').value.trim() ? 'Foto optimizada. Pulsa Guardar cambios para persistirla.' : 'Foto optimizada. Pulsa Crear tipo para persistirla.', 'info');
+      } catch (error) {
+        currentTypeImageData = previousImage;
+        renderTypeImagePreview(currentTypeImageData);
+        input.value = '';
+        setTypeImageControls(previousImage ? 'Imagen actual preparada.' : '', previousImage ? 'Se mantuvo la imagen anterior. Intenta con otra foto.' : DEFAULT_TYPE_IMAGE_HELP);
+        setMsg('catalogMsg', error instanceof Error ? error.message : 'No se pudo procesar la imagen.', 'err');
+      }
+    }
+
+    function removeTypeImage() {
+      if (userRole !== 'admin') {
+        return;
+      }
+      currentTypeImageData = '';
+      document.getElementById('typeImageFile').value = '';
+      renderTypeImagePreview('');
+      setTypeImageControls('Sin foto seleccionada.', 'La card quedara sin imagen cuando guardes el ticket.');
+      setMsg('catalogMsg', 'La foto se quitara cuando guardes el ticket.', 'info');
+    }
+
+    function populateTypeForm(ticketType) {
+      if (!ticketType) {
+        return;
+      }
+      document.getElementById('editingTypeId').value = ticketType.id || '';
+      document.getElementById('typeFormTitle').textContent = 'Editar tipo de ticket';
+      document.getElementById('saveTypeBtn').textContent = 'Guardar cambios';
+      document.getElementById('cancelTypeBtn').style.display = 'inline-flex';
+      document.getElementById('typeName').value = ticketType.name || '';
+      document.getElementById('typePrice').value = String(Number(ticketType.price || 0));
+      document.getElementById('typeQty').value = String(Number(ticketType.quantity || 0));
+      document.getElementById('typeMaxPerson').value = String(Number(ticketType.maxPerPerson || 0));
+      document.getElementById('typeEventId').value = ticketType.eventId || '';
+      document.getElementById('typeCategory').value = ticketType.category || '';
+      document.getElementById('typeImageFile').value = '';
+      currentTypeImageData = ticketType.teamImageUrl || '';
+      renderTypeImagePreview(currentTypeImageData);
+      setTypeImageControls(currentTypeImageData ? 'Foto actual guardada.' : '', currentTypeImageData ? 'Puedes reemplazarla o quitarla antes de guardar los cambios.' : EMPTY_SAVED_IMAGE_HELP);
+      syncTypeLocationFromSelectedEvent();
+      setMsg('catalogMsg', 'Editando el ticket seleccionado. Puedes cambiar tambien la foto.', 'info');
+      showTab('catalog');
+      document.getElementById('createTypeForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function renderTypeCard(ticketType) {
+      const eventMatch = eventsCache.find(function(item) { return item.id === ticketType.eventId; });
+      const eventTitle = eventMatch
+        ? eventMatch.title
+        : (ticketType.eventId ? String(ticketType.eventId).substring(0, 8) + '...' : 'Sin evento vinculado');
+      const eventLocation = eventMatch ? (eventMatch.location || '-') : '-';
+      const isActive = ticketType.isActive !== false;
+      const availability = getAvailabilityState(ticketType);
+
+      const article = document.createElement('article');
+      article.className = 'typeCard' + (isActive ? '' : ' archived');
+
+      const media = document.createElement('div');
+      media.className = 'typeCardMedia';
+      if (ticketType.teamImageUrl) {
+        const image = document.createElement('img');
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.src = ticketType.teamImageUrl;
+        image.alt = 'Foto del equipo para ' + (ticketType.name || 'ticket');
+        image.onload = function() {
+          applyTicketImageFrameClass(media, image);
+        };
+        image.onerror = function() {
+          clearTicketImageFrameClass(media);
+        };
+        if (image.complete) {
+          applyTicketImageFrameClass(media, image);
+        }
+        media.appendChild(image);
+      } else {
+        const fallback = document.createElement('div');
+        fallback.className = 'typeCardFallback';
+        fallback.textContent = 'Sin foto guardada';
+        media.appendChild(fallback);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'typeCardBody';
+
+      const head = document.createElement('div');
+      head.className = 'typeCardHead';
+
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'typeCardTitleWrap';
+      const title = document.createElement('h3');
+      title.className = 'typeCardTitle';
+      title.textContent = ticketType.name || '-';
+      const meta = document.createElement('div');
+      meta.className = 'typeMetaRow';
+      meta.appendChild(createTypeChip(ticketType.category || 'Sin categoria', 'category'));
+      meta.appendChild(createTypeChip(eventTitle, 'event'));
+      meta.appendChild(createTypeChip(availability.label, availability.chipClass));
+      const subtitle = document.createElement('div');
+      subtitle.className = 'typeCardSubtitle';
+      subtitle.textContent = eventLocation || '-';
+      titleWrap.appendChild(title);
+      titleWrap.appendChild(meta);
+      titleWrap.appendChild(subtitle);
+
+      const priceWrap = document.createElement('div');
+      priceWrap.className = 'typeCardPriceWrap';
+      const price = document.createElement('div');
+      price.className = 'typeCardPrice';
+      price.textContent = '$' + Number(ticketType.price || 0).toFixed(2);
+      const status = document.createElement('span');
+      status.className = 'typeStatus ' + (isActive ? 'active' : 'archived');
+      status.textContent = isActive ? 'Activo' : 'Archivado';
+      priceWrap.appendChild(price);
+      priceWrap.appendChild(status);
+
+      head.appendChild(titleWrap);
+      head.appendChild(priceWrap);
+
+  const availabilityBlock = document.createElement('div');
+  availabilityBlock.className = 'typeAvailability';
+  const availabilityHead = document.createElement('div');
+  availabilityHead.className = 'typeAvailabilityHead';
+  const availabilityLabel = document.createElement('div');
+  availabilityLabel.className = 'typeAvailabilityLabel';
+  availabilityLabel.textContent = availability.label;
+  const availabilityValue = document.createElement('div');
+  availabilityValue.className = 'typeAvailabilityValue';
+  availabilityValue.textContent = String(availability.available) + ' disponibles de ' + String(availability.total);
+  availabilityHead.appendChild(availabilityLabel);
+  availabilityHead.appendChild(availabilityValue);
+  const availabilityBar = document.createElement('div');
+  availabilityBar.className = 'typeAvailabilityBar';
+  const availabilityFill = document.createElement('div');
+  availabilityFill.className = 'typeAvailabilityFill' + (availability.barClass ? (' ' + availability.barClass) : '');
+  availabilityFill.style.width = String(availability.ratioPercent) + '%';
+  availabilityBar.appendChild(availabilityFill);
+  availabilityBlock.appendChild(availabilityHead);
+  availabilityBlock.appendChild(availabilityBar);
+
+      const stats = document.createElement('div');
+      stats.className = 'typeStats';
+  stats.appendChild(createInfoBlock('Vendidos', String(availability.sold)));
+  stats.appendChild(createInfoBlock('Disponibles', String(availability.available) + ' / ' + String(availability.total)));
+      stats.appendChild(createInfoBlock('Max/persona', Number(ticketType.maxPerPerson || 0) > 0 ? String(Number(ticketType.maxPerPerson || 0)) : 'Sin limite'));
+
+      const info = document.createElement('div');
+      info.className = 'typeInfoGrid';
+      info.appendChild(createInfoBlock('Evento', eventTitle));
+      info.appendChild(createInfoBlock('Ubicacion', eventLocation || '-'));
+      info.appendChild(createInfoBlock('Categoria', ticketType.category || 'Sin categoria'));
+
+      const details = document.createElement('div');
+      details.className = 'typeCardDetails';
+      details.appendChild(stats);
+      details.appendChild(info);
+
+      const actions = document.createElement('div');
+      actions.className = 'typeCardActions';
+      if (userRole === 'admin') {
+        if (!isActive) {
+          const restoreButton = document.createElement('button');
+          restoreButton.className = 'ghost';
+          restoreButton.type = 'button';
+          restoreButton.textContent = 'Reactivar';
+          restoreButton.onclick = function() { restoreType(ticketType.id); };
+          actions.appendChild(restoreButton);
+        } else {
+          const editButton = document.createElement('button');
+          editButton.className = 'ghost';
+          editButton.type = 'button';
+          editButton.textContent = 'Editar';
+          editButton.onclick = function() { editType(ticketType.id); };
+          const deleteButton = document.createElement('button');
+          deleteButton.className = 'danger';
+          deleteButton.type = 'button';
+          deleteButton.textContent = Number(ticketType.quantitySold || 0) > 0 ? 'Archivar' : 'Eliminar';
+          deleteButton.onclick = function() { deleteType(ticketType.id); };
+          actions.appendChild(editButton);
+          actions.appendChild(deleteButton);
+        }
+      } else {
+        const note = document.createElement('div');
+        note.className = 'small';
+        note.textContent = 'Catalogo en modo solo lectura.';
+        actions.appendChild(note);
+      }
+
+      body.appendChild(head);
+        body.appendChild(availabilityBlock);
+        body.appendChild(details);
+      body.appendChild(actions);
+
+      article.appendChild(media);
+      article.appendChild(body);
+      return article;
+    }
+
     function showTab(name) {
       if (!canAccessTab(name)) {
         name = userRole === 'admin' ? 'catalog' : (userRole === 'standard' ? 'buy' : 'catalog');
@@ -755,7 +1461,7 @@ export class TicketController {
         sel.appendChild(op);
         return;
       }
-      availableTypes.forEach(function(t){
+      availableTypes.forEach(function(t) {
         const available = Number(t.quantity || 0) - Number(t.quantitySold || 0);
         const op = document.createElement('option');
         op.value = t.id;
@@ -775,52 +1481,32 @@ export class TicketController {
       document.getElementById('buyAmount').textContent = '$' + amount.toFixed(2);
     }
 
-
-    async function loadTypes() {
-      setMsg('catalogMsg', '', 'info');
+    async function loadTypes(options) {
+      const config = options || {};
+      if (!config.keepMessage) {
+        setMsg('catalogMsg', '', 'info');
+      }
       try {
         const url = API + '/types' + (userRole === 'admin' ? '?includeInactive=true' : '');
-        const r = await apiFetch(url, { headers: authHeaders() });
-        const d = await r.json();
+        const r = await apiFetch(url, { headers: authHeaders(), cache: 'no-store' });
+        const d = await r.json().catch(function() { return []; });
         if (!r.ok) throw new Error(d.message || 'No se pudo cargar tipos');
         typesCache = Array.isArray(d) ? d : [];
-        const rows = document.getElementById('typesRows');
-        rows.innerHTML = '';
+        renderTypesOverview(typesCache);
+
+        const cards = document.getElementById('typesCards');
+        cards.innerHTML = '';
         if (!typesCache.length) {
-          rows.innerHTML = '<tr><td colspan="10" class="small">No hay tipos de ticket registrados todavía.</td></tr>';
-          setMsg('catalogMsg', 'No hay tipos de ticket registrados todavía.', 'info');
+          cards.innerHTML = '<div class="emptyTypeState">No hay tipos de ticket registrados todavia.</div>';
+          if (!config.keepMessage) {
+            setMsg('catalogMsg', 'No hay tipos de ticket registrados todavia.', 'info');
+          }
           fillTypeSelect();
           return;
         }
-        typesCache.forEach(function(t){
-          const available = Number(t.quantity || 0) - Number(t.quantitySold || 0);
-          const tr = document.createElement('tr');
-          const evtMatch = eventsCache.find(function(e){ return e.id === t.eventId; });
-          const evtTitle = evtMatch ? evtMatch.title : (t.eventId ? t.eventId.substring(0,8)+'…' : '-');
-          const evtLocation = evtMatch ? (evtMatch.location || '-') : '-';
-          const isActive = t.isActive !== false;
-          const state = isActive ? 'Activo' : 'Archivado';
-          let actions = '<span class="small">Solo lectura</span>';
-          if (userRole === 'admin') {
-            if (!isActive) {
-              actions = '<button class="ghost" onclick="restoreType(\\'' + t.id + '\\')">Reactivar</button>';
-            } else if (Number(t.quantitySold || 0) > 0) {
-              actions = '<button class="ghost" onclick="editType(\\'' + t.id + '\\')">Editar</button> <button class="danger" onclick="deleteType(\\'' + t.id + '\\')">Archivar</button>';
-            } else {
-              actions = '<button class="ghost" onclick="editType(\\'' + t.id + '\\')">Editar</button> <button class="danger" onclick="deleteType(\\'' + t.id + '\\')">Eliminar</button>';
-            }
-          }
-          tr.innerHTML = '<td>' + (t.name || '-') + '</td>' +
-            '<td>$' + Number(t.price || 0).toFixed(2) + '</td>' +
-            '<td><strong>' + Number(t.quantitySold || 0) + '</strong></td>' +
-            '<td>' + available + ' / ' + Number(t.quantity || 0) + '</td>' +
-            '<td>' + Number(t.maxPerPerson || 0) + '</td>' +
-            '<td>' + evtTitle + '</td>' +
-            '<td class="small">' + evtLocation + '</td>' +
-            '<td>' + (t.category || '-') + '</td>' +
-            '<td>' + state + '</td>' +
-            '<td>' + actions + '</td>';
-          rows.appendChild(tr);
+
+        typesCache.forEach(function(ticketType) {
+          cards.appendChild(renderTypeCard(ticketType));
         });
         fillTypeSelect();
       } catch (e) {
@@ -829,6 +1515,11 @@ export class TicketController {
     }
 
     async function createType() {
+      if (userRole !== 'admin') {
+        return;
+      }
+
+      const editingId = document.getElementById('editingTypeId').value.trim();
       const body = {
         name: document.getElementById('typeName').value.trim(),
         price: Number(document.getElementById('typePrice').value || 0),
@@ -836,27 +1527,41 @@ export class TicketController {
         maxPerPerson: Number(document.getElementById('typeMaxPerson').value || 0),
         eventId: document.getElementById('typeEventId').value.trim() || undefined,
         category: document.getElementById('typeCategory').value.trim() || undefined,
+        teamImageUrl: editingId ? (currentTypeImageData || null) : (currentTypeImageData || undefined),
       };
       if (!body.name || body.price <= 0 || body.quantity <= 0 || body.maxPerPerson < 0) {
         setMsg('catalogMsg', 'Completa nombre, precio, cantidad y max/persona validos.', 'err');
         return;
       }
+
       try {
-        const r = await apiFetch(API + '/types', {
-          method: 'POST',
+        const r = await apiFetch(API + '/types' + (editingId ? '/' + editingId : ''), {
+          method: editingId ? 'PUT' : 'POST',
           headers: authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(body),
         });
-        const d = await r.json().catch(function(){ return {}; });
-        if (!r.ok) throw new Error(d.message || 'No se pudo crear tipo');
-        setMsg('catalogMsg', 'Tipo de ticket creado en PostgreSQL.', 'ok');
-        document.getElementById('typeName').value = '';
-        document.getElementById('typePrice').value = '';
-        document.getElementById('typeQty').value = '';
-        document.getElementById('typeMaxPerson').value = '';
-        document.getElementById('typeEventId').value = '';
-        document.getElementById('typeCategory').value = '';
-        await loadTypes();
+        const d = await r.json().catch(function() { return {}; });
+        if (!r.ok) throw new Error(d.message || 'No se pudo guardar el tipo');
+        const requestedImageSave = Boolean(currentTypeImageData);
+        const requestedImageRemoval = Boolean(editingId) && body.teamImageUrl === null;
+        const persistedImage = typeof d.teamImageUrl === 'string' && d.teamImageUrl.trim().length > 0;
+
+        if (requestedImageSave && !persistedImage) {
+          setMsg('catalogMsg', 'El ticket se guardó, pero la foto no quedó persistida. Intenta guardar de nuevo.', 'err');
+          await loadTypes({ keepMessage: true });
+          return;
+        }
+
+        let successMessage = editingId ? 'Tipo actualizado correctamente.' : 'Tipo de ticket creado en PostgreSQL.';
+        if (requestedImageSave && persistedImage) {
+          successMessage += ' Foto guardada correctamente.';
+        } else if (requestedImageRemoval && !persistedImage) {
+          successMessage += ' Foto eliminada correctamente.';
+        }
+
+        setMsg('catalogMsg', successMessage, 'ok');
+        resetTypeForm({ keepMessage: true });
+        await loadTypes({ keepMessage: true });
       } catch (e) {
         setMsg('catalogMsg', e.message, 'err');
       }
@@ -864,46 +1569,9 @@ export class TicketController {
 
     async function editType(id) {
       if (userRole !== 'admin') return;
-      const current = typesCache.find(function(x){ return x.id === id; });
+      const current = typesCache.find(function(x) { return x.id === id; });
       if (!current) return;
-
-      const name = prompt('Nombre del ticket:', current.name || '');
-      if (name === null) return;
-      const priceRaw = prompt('Precio del ticket:', String(Number(current.price || 0)));
-      if (priceRaw === null) return;
-      const qtyRaw = prompt('Cantidad total:', String(Number(current.quantity || 0)));
-      if (qtyRaw === null) return;
-      const maxRaw = prompt('Max por persona (0 = sin limite):', String(Number(current.maxPerPerson || 0)));
-      if (maxRaw === null) return;
-      const cat = prompt('Categoria:', current.category || '');
-      if (cat === null) return;
-
-      const body = {
-        name: name.trim(),
-        price: Number(priceRaw),
-        quantity: Number(qtyRaw),
-        maxPerPerson: Number(maxRaw),
-        category: cat.trim() || undefined,
-      };
-
-      if (!body.name || body.price <= 0 || body.quantity <= 0 || body.maxPerPerson < 0) {
-        setMsg('catalogMsg', 'Valores invalidos para actualizar ticket.', 'err');
-        return;
-      }
-
-      try {
-        const r = await apiFetch(API + '/types/' + id, {
-          method: 'PUT',
-          headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify(body),
-        });
-        const d = await r.json().catch(function(){ return {}; });
-        if (!r.ok) throw new Error(d.message || 'No se pudo actualizar tipo');
-        setMsg('catalogMsg', 'Tipo actualizado correctamente.', 'ok');
-        await loadTypes();
-      } catch (e) {
-        setMsg('catalogMsg', e.message, 'err');
-      }
+      populateTypeForm(current);
     }
 
     async function deleteType(id) {
@@ -918,7 +1586,7 @@ export class TicketController {
         const d = await r.json().catch(function(){ return {}; });
         if (!r.ok) throw new Error(d.message || 'No se pudo eliminar tipo');
         setMsg('catalogMsg', d.message || (hasSales ? 'Tipo archivado.' : 'Tipo eliminado.'), 'ok');
-        await loadTypes();
+        await loadTypes({ keepMessage: true });
       } catch (e) {
         setMsg('catalogMsg', e.message, 'err');
       }
@@ -933,7 +1601,7 @@ export class TicketController {
         const d = await r.json().catch(function(){ return {}; });
         if (!r.ok) throw new Error(d.message || 'No se pudo reactivar tipo');
         setMsg('catalogMsg', 'Tipo reactivado correctamente.', 'ok');
-        await loadTypes();
+        await loadTypes({ keepMessage: true });
       } catch (e) {
         setMsg('catalogMsg', e.message, 'err');
       }
@@ -1030,6 +1698,7 @@ export class TicketController {
         const data = await r.json();
         eventsCache = Array.isArray(data) ? data : [];
         const sel = document.getElementById('typeEventId');
+        const currentValue = sel.value;
         sel.innerHTML = '<option value="">-- Sin evento --</option>';
         eventsCache.forEach(function(e) {
           const op = document.createElement('option');
@@ -1039,10 +1708,9 @@ export class TicketController {
           op.dataset.location = e.location || '';
           sel.appendChild(op);
         });
-        sel.addEventListener('change', function() {
-          const opt = sel.options[sel.selectedIndex];
-          document.getElementById('typeLocation').value = opt ? (opt.dataset.location || '') : '';
-        });
+        sel.value = currentValue || '';
+        sel.onchange = syncTypeLocationFromSelectedEvent;
+        syncTypeLocationFromSelectedEvent();
       } catch (e) {
         console.warn('[ticketing] event-service no disponible:', e.message);
       }
@@ -1067,10 +1735,13 @@ export class TicketController {
       if (sessionUser?.email) {
         document.getElementById('buyEmail').value = sessionUser.email;
       }
+      document.getElementById('typeImageFile').onchange = handleTypeImageChange;
+      renderTypeImagePreview(currentTypeImageData);
+      resetTypeForm({ keepMessage: true });
       loadEvents();
       loadTypes();
-      document.getElementById('buyQty').addEventListener('input', calcAmount);
-      document.getElementById('buyType').addEventListener('change', calcAmount);
+      document.getElementById('buyQty').oninput = calcAmount;
+      document.getElementById('buyType').onchange = calcAmount;
     }
 
     // Receive token from parent frame (user-service embeds this via iframe)
@@ -1138,6 +1809,7 @@ export class TicketController {
       eventId?: string;
       category?: string;
       maxPerPerson?: number;
+      teamImageUrl?: string;
     },
   ) {
     if (!body.name || body.price < 0 || body.quantity < 0) {
@@ -1162,8 +1834,10 @@ export class TicketController {
       name?: string;
       price?: number;
       quantity?: number;
+      eventId?: string;
       category?: string;
       maxPerPerson?: number;
+      teamImageUrl?: string | null;
     },
   ) {
     return await this.ticketService.updateTicketType(id, body);

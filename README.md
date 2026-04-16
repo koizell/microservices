@@ -113,22 +113,28 @@ docker compose -f docker-compose.infrastructure.yml up -d
 
 Si RabbitMQ no esta disponible, varios servicios degradan de forma controlada, pero algunas funciones asincronas no estaran activas.
 
-### 3. Levantar microservicios
+### 3. Levantar todo el stack local desde la raiz
 
-Abre una terminal por servicio y ejecuta:
+Desde la raiz del repositorio puedes arrancar el frontend y todos los microservicios principales con un solo comando:
 
 ```bash
-npm run start:dev
+npm run start:local
 ```
 
-Los servicios principales usan ese mismo script. Los que tienen pruebas formales tambien exponen `npm test` y, en algunos casos, `npm run test:e2e`.
-
-### 4. Levantar el frontend local
-
-Desde la raiz del repositorio:
+El comando tambien esta expuesto como:
 
 ```bash
 npm run start:frontend
+```
+
+Si algun puerto ya esta ocupado, el lanzador lo detecta y no vuelve a iniciar ese servicio.
+
+### 4. Levantar solo el frontend local
+
+Si ya tienes los microservicios corriendo por separado y solo quieres levantar el shell web:
+
+```bash
+npm run start:frontend:only
 ```
 
 Abre:
@@ -140,8 +146,8 @@ http://localhost:3009
 ## Flujo local recomendado
 
 1. Levanta PostgreSQL y RabbitMQ.
-2. Arranca `user-service`, `event-service`, `ticketing-service`, `notification-service`, `credential-service`, `agenda-service`, `analytics-service`, `mobile-api-service` y `api-gateway`.
-3. Arranca el frontend con `npm run start:frontend`.
+2. Arranca todo con `npm run start:local` desde la raiz.
+3. Si solo necesitas la UI, usa `npm run start:frontend:only` y deja los microservicios en terminales separadas.
 4. Verifica salud via gateway o directamente por servicio.
 
 ## Endpoints de salud

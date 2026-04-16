@@ -8,6 +8,11 @@ import { Event } from './event.entity';
 import { RoleGuard } from './guards/role.guard';
 
 const databaseUrl = String(process.env.DATABASE_URL ?? '').trim();
+const shouldSynchronize = String(
+  process.env.DB_SYNCHRONIZE ?? (process.env.NODE_ENV === 'production' ? 'false' : 'true'),
+)
+  .trim()
+  .toLowerCase() === 'true';
 
 @Module({
   imports: [
@@ -25,7 +30,7 @@ const databaseUrl = String(process.env.DATABASE_URL ?? '').trim();
             database: process.env.DB_NAME ?? 'postgres',
           }),
       entities: [Event],
-      synchronize: process.env.DB_SYNCHRONIZE === 'true', // Solo para desarrollo
+      synchronize: shouldSynchronize, // Solo para desarrollo local salvo que se desactive explicitamente
       autoLoadEntities: true,
       extra: {
         max: Number(process.env.DB_POOL_MAX ?? 3),

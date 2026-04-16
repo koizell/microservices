@@ -1,8 +1,11 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
 import { randomUUID } from 'crypto';
-import { AppModule } from './app.module';
+import { resolve } from 'path';
 import prometheus from 'prom-client';
+
+loadEnv({ path: resolve(process.cwd(), '.env') });
+loadEnv({ path: resolve(process.cwd(), '..', '.env'), override: false });
 
 // Crear un registro de prometheus
 const register = new prometheus.Registry();
@@ -35,6 +38,7 @@ function isPublicServicePath(pathname: string) {
 }
 
 async function bootstrap() {
+  const { AppModule } = await import('./app.module.js');
   const app = await NestFactory.create(AppModule);
   const server = app.getHttpAdapter().getInstance();
 

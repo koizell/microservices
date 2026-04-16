@@ -315,6 +315,18 @@ body::before {
   display: block;
 }
 
+.alert-action {
+  display: inline-flex;
+  margin-top: 10px;
+  font-weight: 800;
+  text-decoration: underline;
+  color: inherit;
+}
+
+.alert-action:hover {
+  opacity: 0.78;
+}
+
 .app-shell {
   position: relative;
   z-index: 2;

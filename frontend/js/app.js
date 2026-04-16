@@ -214,6 +214,28 @@ function setAlert(id, message, type) {
   element.className = "alert" + (message ? " show " + type : "");
 }
 
+function setAlertWithAction(id, message, type, actionUrl, actionLabel) {
+  const element = document.getElementById(id);
+  if (!element) {
+    return;
+  }
+
+  element.textContent = message;
+
+  if (actionUrl && actionLabel) {
+    const link = document.createElement("a");
+    link.href = actionUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.className = "alert-action";
+    link.textContent = actionLabel;
+    element.appendChild(document.createElement("br"));
+    element.appendChild(link);
+  }
+
+  element.className = "alert" + (message ? " show " + type : "");
+}
+
 function showView(id) {
   document.querySelectorAll(".view").forEach(function (view) {
     view.classList.remove("active");
@@ -780,12 +802,12 @@ function agendaUpdateSummary(range) {
     summary.textContent = String(totals.visible || 0) + " bloques visibles · " + String(totals.pending || 0) + " pendientes · " + String(totals.active || 0) + " en curso · " + String(totals.past || 0) + " pasados";
   }
   if (heroTitle) {
-    heroTitle.textContent = role === "admin" ? "Agenda del organizador" : "Agenda del evento";
+    heroTitle.textContent = role === "admin" ? "Agenda del organizador" : "Mi agenda";
   }
   if (heroCopy) {
     heroCopy.textContent = role === "admin"
       ? "Consulta la operacion del evento por fecha y hora, con foco en lo pendiente y lo ya ejecutado."
-      : "Consulta las fechas y horarios confirmados de los eventos disponibles en la plataforma.";
+      : "Consulta solo las fechas y horarios de los eventos para los que ya compraste ticket.";
   }
 
   [
@@ -927,6 +949,7 @@ function agendaRenderPanel() {
     return;
   }
 
+  const role = agendaCurrentRole();
   const range = agendaRangeForState();
   agendaSyncSelection(range);
   agendaUpdateSummary(range);
@@ -937,9 +960,13 @@ function agendaRenderPanel() {
   }
 
   if (!agendaState.items.length) {
-    calendar.innerHTML = agendaState.view === "day" && agendaState.filter !== "past"
-      ? '<div class="agenda-empty">No hay dias futuros con eventos disponibles por ahora.</div>'
-      : '<div class="agenda-empty">No hay eventos para el rango seleccionado. Prueba con otro periodo o cambia el filtro.</div>';
+    calendar.innerHTML = role === "standard"
+      ? (agendaState.view === "day" && agendaState.filter !== "past"
+        ? '<div class="agenda-empty">No hay fechas futuras disponibles para los tickets que ya compraste.</div>'
+        : '<div class="agenda-empty">No hay fechas de tus tickets para el rango seleccionado.</div>')
+      : (agendaState.view === "day" && agendaState.filter !== "past"
+        ? '<div class="agenda-empty">No hay dias futuros con eventos disponibles por ahora.</div>'
+        : '<div class="agenda-empty">No hay eventos para el rango seleccionado. Prueba con otro periodo o cambia el filtro.</div>');
     agendaRenderSelectedDay();
     return;
   }
@@ -1047,7 +1074,11 @@ async function loadAgendaPanel(force) {
       end: requestRange.end,
       status: agendaState.filter,
     });
-    const response = await serviceFetch("agenda", "/calendar/data?" + params.toString());
+    const response = await serviceFetch(
+      "agenda",
+      "/calendar/data?" + params.toString(),
+      sessionToken ? { headers: { Authorization: "Bearer " + sessionToken } } : undefined,
+    );
     const payload = await readResponsePayload(response);
 
     if (!response.ok) {
@@ -1611,8 +1642,18 @@ async function doRegister() {
       throw new Error(data.message || "No se pudo crear la cuenta");
     }
 
-    const preview = data.confirmationPreviewUrl ? " En este entorno no hay SMTP configurado, asi que puedes abrir el enlace de confirmacion manual: " + data.confirmationPreviewUrl : "";
-    setAlert("alertReg", "Cuenta creada. Revisa tu correo para activarla antes de iniciar sesion." + preview, "ok");
+    if (data.confirmationPreviewUrl) {
+      setAlertWithAction(
+        "alertReg",
+        "Cuenta creada. En este entorno local no hay SMTP configurado, asi que debes confirmar la cuenta manualmente.",
+        "ok",
+        data.confirmationPreviewUrl,
+        "Abrir enlace de confirmacion",
+      );
+      return;
+    }
+
+    setAlert("alertReg", "Cuenta creada. Revisa tu correo para activarla antes de iniciar sesion.", "ok");
     setTimeout(function () {
       showView("vLogin");
     }, 2600);
@@ -1642,8 +1683,18 @@ function doForgot() {
       if (!response.ok) {
         throw new Error(data.message || "No se pudo iniciar el restablecimiento");
       }
-      const preview = data.resetPreviewUrl ? " En este entorno no hay SMTP configurado, asi que puedes abrir manualmente: " + data.resetPreviewUrl : "";
-      setAlert("alertForgot", "Si esa cuenta existe, recibiras las instrucciones en tu bandeja de entrada en los proximos minutos." + preview, "ok");
+      if (data.resetPreviewUrl) {
+        setAlertWithAction(
+          "alertForgot",
+          "En este entorno local no hay SMTP configurado, asi que debes abrir manualmente el enlace de restablecimiento.",
+          "ok",
+          data.resetPreviewUrl,
+          "Abrir enlace de restablecimiento",
+        );
+        return;
+      }
+
+      setAlert("alertForgot", "Si esa cuenta existe, recibiras las instrucciones en tu bandeja de entrada en los proximos minutos.", "ok");
     })
     .catch(function (error) {
       setAlert("alertForgot", error.message, "err");

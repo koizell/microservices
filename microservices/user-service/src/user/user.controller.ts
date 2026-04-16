@@ -401,14 +401,14 @@ body::before{
             <button class="cta" onclick="switchPanel('notificaciones', document.getElementById('tabNotifs'))">Ver notificaciones</button>
           </article>
           <article class="panel-card standard-only" data-role-group="buyer">
-            <div class="head"><span class="ico">🎟️</span><span>Compra rapida</span></div>
-            <p>Accede al flujo de compra de tickets y a tus credenciales digitales.</p>
-            <button class="cta" onclick="switchPanel('tickets', document.getElementById('tabTickets'))">Ir a Tickets</button>
+            <div class="head"><span class="ico">🎟️</span><span>Administracion de tickets</span></div>
+            <p>Accede al panel de tickets para gestionar catalogo, disponibilidad y cambios del evento.</p>
+            <button class="cta" onclick="switchPanel('tickets', document.getElementById('tabTickets'))">Abrir tickets</button>
           </article>
           <article class="panel-card admin-only">
-            <div class="head"><span class="ico">📊</span><span>Centro de control</span></div>
-            <p>Gestiona usuarios, eventos y metricas desde el panel administrativo.</p>
-            <button class="cta" onclick="switchPanel('admin', document.getElementById('tabAdmin'))">Abrir Admin</button>
+            <div class="head"><span class="ico">📊</span><span>Analitica</span></div>
+            <p>Consulta ventas, asistencia y metricas del evento desde el panel de analitica.</p>
+            <button class="cta" onclick="switchPanel('analytica', document.getElementById('tabAnalytica'))">Abrir analitica</button>
           </article>
           <article class="panel-card guest-only">
             <div class="head"><span class="ico">👀</span><span>Modo invitado</span></div>

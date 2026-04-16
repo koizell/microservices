@@ -28,6 +28,34 @@ function buildInternalServiceHeaders(headers: Record<string, string> = {}) {
   return normalized;
 }
 
+function normalizeTicketTypeImage(value: unknown): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length > 1_800_000) {
+    throw new BadRequestException('Team image is too large');
+  }
+
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(normalized)) {
+    return normalized;
+  }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+
+  throw new BadRequestException('Team image must be a valid image url or data url');
+}
+
 type PurchaseInput = {
   userId: string;
   ticketTypeId?: string;
@@ -73,6 +101,7 @@ const TICKETING_TABLE_COLUMNS = {
     { legacyName: null, columnName: 'organizer_id', definition: 'VARCHAR(120) NULL' },
     { legacyName: null, columnName: 'organizer_name', definition: 'VARCHAR(200) NULL' },
     { legacyName: null, columnName: 'organizer_email', definition: 'VARCHAR(255) NULL' },
+    { legacyName: null, columnName: 'team_image_url', definition: 'TEXT NULL' },
     { legacyName: 'isActive', columnName: 'is_active', definition: 'BOOLEAN NOT NULL DEFAULT TRUE' },
     { legacyName: 'archivedAt', columnName: 'archived_at', definition: 'TIMESTAMP NULL' },
     { legacyName: 'createdAt', columnName: 'created_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
@@ -141,6 +170,7 @@ export class TicketService implements OnModuleInit {
         max_per_person INT NOT NULL DEFAULT 0,
         event_id VARCHAR(120) NULL,
         category VARCHAR(120) NULL,
+        team_image_url TEXT NULL,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         archived_at TIMESTAMP NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -545,6 +575,7 @@ export class TicketService implements OnModuleInit {
     organizerId?: string;
     organizerName?: string;
     organizerEmail?: string;
+    teamImageUrl?: string;
   }): Promise<TicketType> {
     const name = (data.name || '').trim();
     const price = Number(data.price ?? 0);
@@ -566,6 +597,7 @@ export class TicketService implements OnModuleInit {
     const organizerId = String(data.organizerId || '').trim();
     const organizerName = String(data.organizerName || '').trim();
     const organizerEmail = String(data.organizerEmail || '').trim().toLowerCase();
+    const teamImageUrl = normalizeTicketTypeImage(data.teamImageUrl);
     const ticketType = this.ticketTypeRepository.create(data);
     ticketType.name = name;
     ticketType.price = price;
@@ -583,6 +615,9 @@ export class TicketService implements OnModuleInit {
     if (organizerEmail) {
       ticketType.organizerEmail = organizerEmail;
     }
+    if (teamImageUrl) {
+      ticketType.teamImageUrl = teamImageUrl;
+    }
     return await this.ticketTypeRepository.save(ticketType);
   }
 
@@ -592,8 +627,10 @@ export class TicketService implements OnModuleInit {
       name: string;
       price: number;
       quantity: number;
+      eventId: string;
       category: string;
       maxPerPerson: number;
+      teamImageUrl: string | null;
     }>,
   ): Promise<TicketType> {
     const ticketType = await this.ticketTypeRepository.findOneBy({ id });
@@ -628,12 +665,23 @@ export class TicketService implements OnModuleInit {
       data.name = name;
     }
 
+    if (data.eventId !== undefined) {
+      const eventId = String(data.eventId || '').trim();
+      data.eventId = eventId || undefined;
+    }
+
     if (data.maxPerPerson !== undefined) {
       const maxPerPerson = Number(data.maxPerPerson);
       if (!Number.isInteger(maxPerPerson) || maxPerPerson < 0) {
         throw new BadRequestException('maxPerPerson must be 0 or a positive integer');
       }
       data.maxPerPerson = maxPerPerson;
+    }
+
+    const normalizedTeamImage = normalizeTicketTypeImage(data.teamImageUrl);
+    if (normalizedTeamImage !== undefined) {
+      ticketType.teamImageUrl = normalizedTeamImage || null;
+      delete data.teamImageUrl;
     }
 
     if (ticketType.isActive === false) {

@@ -89,11 +89,16 @@ export function buildServiceBaseUrlCandidates(value: string | undefined, fallbac
     .trim()
     .replace(/\/+$/, '');
   const candidates = new Set<string>();
+  const shouldAllowPublicFallback = String(
+    process.env.GATEWAY_ALLOW_PUBLIC_FALLBACK ?? (process.env.NODE_ENV === 'production' ? 'true' : 'false'),
+  )
+    .trim()
+    .toLowerCase() === 'true';
 
   if (rawCandidate) {
     candidates.add(normalizeServiceBaseUrl(rawCandidate, fallback));
 
-    if (!/^https?:\/\//i.test(rawCandidate)) {
+    if (shouldAllowPublicFallback && !/^https?:\/\//i.test(rawCandidate)) {
       const host = rawCandidate.split(':')[0]?.trim();
       if (host && /^eventhive-[a-z0-9-]+$/i.test(host)) {
         candidates.add(`https://${host}.onrender.com`);
@@ -101,8 +106,10 @@ export function buildServiceBaseUrlCandidates(value: string | undefined, fallbac
     }
   }
 
-  candidates.add(normalizeServiceBaseUrl(publicFallback, fallback));
   candidates.add(normalizeServiceBaseUrl(undefined, fallback));
+  if (shouldAllowPublicFallback) {
+    candidates.add(normalizeServiceBaseUrl(publicFallback, fallback));
+  }
   return [...candidates];
 }
 

@@ -35,6 +35,9 @@ export class TicketType {
   @Column({ name: 'category', nullable: true })
   category?: string;
 
+  @Column({ name: 'team_image_url', type: 'text', nullable: true })
+  teamImageUrl?: string | null;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
