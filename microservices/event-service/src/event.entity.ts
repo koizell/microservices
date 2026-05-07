@@ -29,6 +29,15 @@ export class Event {
   @Column({ name: 'active_weekdays', type: 'simple-json', nullable: true })
   activeWeekdays: string[] | null;
 
+  @Column({ name: 'organizer_id', type: 'varchar', length: 120, nullable: true })
+  organizerId: string | null;
+
+  @Column({ name: 'organizer_name', type: 'varchar', length: 200, nullable: true })
+  organizerName: string | null;
+
+  @Column({ name: 'organizer_email', type: 'varchar', length: 255, nullable: true })
+  organizerEmail: string | null;
+
   @Column({ name: 'is_archived', default: false })
   isArchived: boolean;
 

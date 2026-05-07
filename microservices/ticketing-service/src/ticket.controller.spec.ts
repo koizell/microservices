@@ -9,7 +9,9 @@ describe('TicketController', () => {
     countAll: jest.fn(),
   };
 
-  const controller = new TicketController(ticketService as any);
+  const mpService = { isEnabled: jest.fn().mockReturnValue(false), createPreference: jest.fn(), getPayment: jest.fn() };
+
+  const controller = new TicketController(ticketService as any, mpService as any);
 
   it('returns service health', () => {
     expect(controller.status()).toEqual({ service: 'ticketing-service', status: 'ok' });

@@ -162,6 +162,7 @@ function normalizeSessionUser(candidateUser, rawToken, fallbackEmail) {
     accountType: normalizeRole(source.accountType || (payload && payload.accountType) || "guest"),
     isEmailVerified: Boolean(source.isEmailVerified),
     emailVerifiedAt: source.emailVerifiedAt || null,
+    avatarUrl: source.avatarUrl || null,
   };
 }
 
@@ -377,6 +378,7 @@ function tabIdForPanel(panelName) {
     notificaciones: "tabNotifs",
     analytica: "tabAnalytica",
     admin: "tabAdmin",
+    perfil: "tabPerfil",
   };
   return tabMap[panelName] || "tabInicio";
 }
@@ -453,6 +455,9 @@ function switchPanel(name, tabButton) {
   document.querySelectorAll(".top-nav button").forEach(function (button) {
     button.classList.remove("active");
   });
+  // Quitar active del botón de perfil si no es el panel activo
+  const perfilBtn = document.getElementById("tabPerfil");
+  if (perfilBtn && name !== "perfil") perfilBtn.classList.remove("active");
 
   const appMain = document.getElementById("appMain");
   if (appMain) {
@@ -469,7 +474,17 @@ function switchPanel(name, tabButton) {
 
   if (name === "tickets") {
     const effectiveRole = normalizeRole((currentUser && currentUser.accountType) || "guest");
-    ensureEmbeddedService("ticketingFrame", "ticketing", effectiveRole === "admin" ? "/organizer" : "/client");
+    const ticketPath = effectiveRole === "admin" ? "/organizer" : "/client";
+    const ticketFrame = document.getElementById("ticketingFrame");
+    // Forzar recarga si la URL cargada no coincide con el rol actual
+    if (ticketFrame) {
+      const expectedUrl = (ticketPath.startsWith("/") ? ticketPath : "/" + ticketPath);
+      const loadedUrl = String(ticketFrame.dataset.loadedUrl || "");
+      if (!loadedUrl.endsWith(expectedUrl)) {
+        ticketFrame.dataset.loadedUrl = "";
+      }
+    }
+    ensureEmbeddedService("ticketingFrame", "ticketing", ticketPath);
   }
 
   if (name === "eventos") {
@@ -499,6 +514,10 @@ function switchPanel(name, tabButton) {
 
   if (name === "notificaciones") {
     loadNotificationsPanel();
+  }
+
+  if (name === "perfil") {
+    loadProfilePanel();
   }
 
   if (sessionToken && currentUser && panel) {
@@ -1244,19 +1263,51 @@ function setNotifStatus(message, type) {
   status.className = "notif-status" + (message ? " show " + (type || "info") : "");
 }
 
+function applyNotificationsRoleUi() {
+  const role = normalizeRole(currentUser && currentUser.accountType);
+  const grid = document.querySelector("#panel-notificaciones .notifications-grid");
+  const listTitle = document.getElementById("notifListTitle");
+  const listHint = document.getElementById("notifListHint");
+  const composerCard = document.getElementById("notifComposerCard");
+  const composerTitle = document.getElementById("notifComposerTitle");
+  const composerHint = document.getElementById("notifComposerHint");
+
+  if (role === "admin") {
+    if (listTitle) listTitle.textContent = "Ventas recientes";
+    if (listHint) listHint.textContent = "Solo compras registradas para tus tickets.";
+    if (composerTitle) composerTitle.textContent = "Mensaje a compradores";
+    if (composerHint) composerHint.textContent = "Envia un correo personalizado a quienes compraron un ticket tuyo.";
+    if (composerCard) composerCard.style.display = "block";
+    if (grid) grid.style.gridTemplateColumns = "minmax(0, 1.15fr) minmax(0, 0.85fr)";
+    return;
+  }
+
+  if (listTitle) listTitle.textContent = "Mis avisos";
+  if (listHint) listHint.textContent = "Aqui veras los avisos y correos enviados por organizadores a los tickets que compraste.";
+  if (composerCard) composerCard.style.display = "none";
+  if (grid) grid.style.gridTemplateColumns = "minmax(0, 1fr)";
+}
+
 function renderNotificationList(items) {
   const list = document.getElementById("notifList");
   if (!list) {
     return;
   }
 
+  const role = normalizeRole(currentUser && currentUser.accountType);
+
   if (!items || !items.length) {
-    list.innerHTML = '<div class="notifications-empty">Aun no hay ventas registradas.</div>';
+    list.innerHTML = role === "admin"
+      ? '<div class="notifications-empty">Aun no hay ventas registradas.</div>'
+      : '<div class="notifications-empty">Aun no tienes avisos relacionados con tickets comprados.</div>';
     return;
   }
 
   list.innerHTML = items.map(function (item) {
-    return '<div class="notification-item"><strong>' + escapeHtml(item.message || "") + '</strong><small>' + escapeHtml(item.recipient || "") + '</small></div>';
+    const subtitle = role === "admin"
+      ? escapeHtml(item.recipient || "")
+      : "Mensaje recibido en tu cuenta";
+    return '<div class="notification-item"><strong>' + escapeHtml(item.message || "") + '</strong><small>' + subtitle + '</small></div>';
   }).join("");
 }
 
@@ -1281,12 +1332,6 @@ function renderNotificationAudience(audience) {
 async function loadNotificationList() {
   const list = document.getElementById("notifList");
   if (!list) {
-    return;
-  }
-
-  const role = normalizeRole(currentUser && currentUser.accountType);
-  if (role !== "admin") {
-    list.innerHTML = '<div class="notifications-empty">Disponible solo para organizadores.</div>';
     return;
   }
 
@@ -1454,6 +1499,7 @@ function loadNotificationsPanel(force) {
   }
 
   notificationsState.loading = true;
+  applyNotificationsRoleUi();
   Promise.resolve()
     .then(function () {
       return loadNotificationList();
@@ -1489,6 +1535,10 @@ function showSession(preferredPanel) {
   document.getElementById("sessId").textContent = currentUser.id || "No disponible";
   roleElement.textContent = roleLabel(role);
   roleElement.className = "role-pill " + role;
+
+  const navName = document.getElementById("profileNavName");
+  if (navName) navName.textContent = displayName.split(" ")[0] || "";
+  renderProfileAvatar(currentUser.avatarUrl || null);
   applyRoleInterface(role);
   switchPanel(targetPanel, document.getElementById(tabIdForPanel(targetPanel)));
   pushSessionToEmbeddedServices();
@@ -1869,6 +1919,232 @@ window.addEventListener("DOMContentLoaded", function () {
     return;
   }
 
+  const changePasswordParam = getParam("changePasswordToken");
+  if (changePasswordParam) {
+    confirmPasswordChangeFromToken(changePasswordParam);
+    return;
+  }
+
   showView("vLogin");
   restoreSessionState();
 });
+
+// ──────────────────────────────────────────────
+// PANEL PERFIL
+// ──────────────────────────────────────────────
+
+function loadProfilePanel() {
+  if (!currentUser) return;
+  const nameInput = document.getElementById("profileNameInput");
+  const emailDisplay = document.getElementById("profileEmailDisplay");
+  const sidebarName = document.getElementById("profileSidebarName");
+  const sidebarEmail = document.getElementById("profileSidebarEmail");
+  const sidebarRole = document.getElementById("profileSidebarRole");
+  const navName = document.getElementById("profileNavName");
+
+  if (nameInput) nameInput.value = currentUser.name || "";
+  if (emailDisplay) emailDisplay.value = currentUser.email || "";
+  if (sidebarName) sidebarName.textContent = currentUser.name || "";
+  if (sidebarEmail) sidebarEmail.textContent = currentUser.email || "";
+  if (sidebarRole) {
+    sidebarRole.textContent = roleLabel(normalizeRole(currentUser.accountType || "guest"));
+    sidebarRole.className = "role-pill " + normalizeRole(currentUser.accountType || "guest");
+  }
+  if (navName) navName.textContent = (currentUser.name || "").split(" ")[0] || "";
+
+  const avatarUrl = currentUser.avatarUrl || null;
+  renderProfileAvatar(avatarUrl);
+}
+
+function renderProfileAvatar(url) {
+  const big = document.getElementById("profileAvatarBig");
+  const thumb = document.getElementById("profileAvatarThumb");
+  const svg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
+  const bigSvg = `<svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
+  if (url) {
+    if (big) big.innerHTML = `<img src="${url}" alt="avatar">`;
+    if (thumb) thumb.innerHTML = `<img src="${url}" alt="avatar">`;
+  } else {
+    if (big) big.innerHTML = bigSvg;
+    if (thumb) thumb.innerHTML = svg;
+  }
+}
+
+function handleProfilePhotoChange(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    setAlert("alertProfile", "Solo se permiten archivos de imagen.", "err");
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    setAlert("alertProfile", "La imagen no puede superar 10 MB.", "err");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    const img = new Image();
+    img.onload = async function () {
+      const MAX = 300;
+      const canvas = document.createElement("canvas");
+      let w = img.width, h = img.height;
+      if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+      else { w = Math.round(w * MAX / h); h = MAX; }
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+      renderProfileAvatar(dataUrl);
+      await saveProfilePhoto(dataUrl);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveProfilePhoto(dataUrl) {
+  if (!sessionToken || !currentUser) return;
+  try {
+    const response = await serviceFetch("user", "/profile", {
+      method: "PUT",
+      headers: { Authorization: "Bearer " + sessionToken },
+      body: { avatarUrl: dataUrl },
+    });
+    const payload = await readResponsePayload(response);
+    if (!response.ok) throw new Error(payload.data.message || "Error al guardar la foto");
+    if (payload.data.user && payload.data.user.avatarUrl !== undefined) {
+      currentUser.avatarUrl = payload.data.user.avatarUrl;
+      saveSessionState(localStorage.getItem(storageKeys.lastPanel) || "inicio");
+    }
+    setAlert("alertProfile", "Foto actualizada correctamente.", "ok");
+  } catch (err) {
+    setAlert("alertProfile", err.message || "Error al guardar la foto.", "err");
+    renderProfileAvatar(currentUser.avatarUrl || null);
+  }
+}
+
+async function saveProfile() {
+  if (!sessionToken || !currentUser) return;
+  const nameInput = document.getElementById("profileNameInput");
+  const pwInput = document.getElementById("profileNamePw");
+  const btn = document.getElementById("profileSaveBtn");
+  const name = (nameInput && nameInput.value.trim()) || "";
+  const pw = (pwInput && pwInput.value) || "";
+  if (!name || name.length < 2) {
+    setAlert("alertProfile", "El nombre debe tener al menos 2 caracteres.", "err");
+    return;
+  }
+  if (!pw) {
+    setAlert("alertProfile", "Introduce tu contrasena actual para guardar los cambios.", "err");
+    if (pwInput) pwInput.focus();
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "Guardando..."; }
+  try {
+    const response = await serviceFetch("user", "/profile", {
+      method: "PUT",
+      headers: { Authorization: "Bearer " + sessionToken },
+      body: { name: name, currentPassword: pw },
+    });
+    const payload = await readResponsePayload(response);
+    if (!response.ok) throw new Error(payload.data.message || "Error al guardar");
+    currentUser.name = name;
+    saveSessionState(localStorage.getItem(storageKeys.lastPanel) || "inicio");
+    const sidebarName = document.getElementById("profileSidebarName");
+    const navName = document.getElementById("profileNavName");
+    const greet = document.getElementById("sessGreet");
+    if (sidebarName) sidebarName.textContent = name;
+    if (navName) navName.textContent = name.split(" ")[0] || "";
+    if (greet) greet.textContent = "Hola, " + name + "!";
+    if (pwInput) pwInput.value = "";
+    setAlert("alertProfile", "Nombre actualizado correctamente.", "ok");
+  } catch (err) {
+    setAlert("alertProfile", err.message || "Error al guardar el perfil.", "err");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Guardar cambios"; }
+  }
+}
+
+async function requestPasswordChange() {
+  const currentPw = document.getElementById("profileCurrentPw");
+  const newPw = document.getElementById("profileNewPw");
+  const confirmPw = document.getElementById("profileConfirmPw");
+  const btn = document.getElementById("profileChangePwBtn");
+
+  if (!currentPw || !newPw || !confirmPw) return;
+  const cur = currentPw.value;
+  const nw = newPw.value;
+  const conf = confirmPw.value;
+
+  if (!cur) { setAlert("alertSecurity", "Introduce tu contrasena actual.", "err"); return; }
+  if (nw.length < 8) { setAlert("alertSecurity", "La nueva contrasena debe tener al menos 8 caracteres.", "err"); return; }
+  if (nw !== conf) { setAlert("alertSecurity", "Las contrasenas nuevas no coinciden.", "err"); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = "Enviando..."; }
+  try {
+    const response = await serviceFetch("user", "/auth/request-password-change", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + sessionToken },
+      body: { currentPassword: cur, newPassword: nw },
+    });
+    const payload = await readResponsePayload(response);
+    if (!response.ok) throw new Error(payload.data.message || "Error al procesar el cambio");
+
+    const form = document.getElementById("securityForm");
+    const sent = document.getElementById("securityEmailSent");
+    const emailTarget = document.getElementById("securityEmailTarget");
+    if (form) form.style.display = "none";
+    if (sent) sent.style.display = "block";
+    if (emailTarget && currentUser) emailTarget.textContent = currentUser.email || "";
+
+    if (payload.data.previewUrl) {
+      console.info("[dev] Enlace de confirmacion:", payload.data.previewUrl);
+    }
+  } catch (err) {
+    setAlert("alertSecurity", err.message || "No se pudo enviar el correo de confirmacion.", "err");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2H3v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V2z"/><path d="m7 10 3 3 7-7"/></svg> Solicitar cambio de contrasena`; }
+  }
+}
+
+function resetSecurityForm() {
+  const form = document.getElementById("securityForm");
+  const sent = document.getElementById("securityEmailSent");
+  if (form) form.style.display = "";
+  if (sent) sent.style.display = "none";
+  const cur = document.getElementById("profileCurrentPw");
+  const nw = document.getElementById("profileNewPw");
+  const conf = document.getElementById("profileConfirmPw");
+  if (cur) cur.value = "";
+  if (nw) nw.value = "";
+  if (conf) conf.value = "";
+  setAlert("alertSecurity", "", "");
+}
+
+function switchProfileTab(tabName, btn) {
+  document.querySelectorAll(".profile-tab").forEach(function (t) { t.classList.remove("active"); });
+  document.querySelectorAll(".profile-sidenav-btn").forEach(function (b) { b.classList.remove("active"); });
+  const tab = document.getElementById("profileTab" + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+  if (tab) tab.classList.add("active");
+  if (btn) btn.classList.add("active");
+}
+
+async function confirmPasswordChangeFromToken(token) {
+  try {
+    const response = await serviceFetch("user", "/auth/confirm-password-change", {
+      method: "POST",
+      body: { token: token },
+    });
+    const payload = await readResponsePayload(response);
+    showView("vLogin");
+    if (response.ok) {
+      setAlert("alertLogin", "Contrasena cambiada correctamente. Por favor inicia sesion de nuevo.", "ok");
+    } else {
+      const reason = (payload.data && payload.data.message) || "El enlace no es valido o ha expirado.";
+      setAlert("alertLogin", reason, "err");
+    }
+  } catch {
+    showView("vLogin");
+    setAlert("alertLogin", "No se pudo confirmar el cambio de contrasena. El enlace puede haber expirado.", "err");
+  }
+}

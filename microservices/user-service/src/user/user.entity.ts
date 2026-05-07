@@ -43,4 +43,16 @@ export class User {
 
   @Column({ name: 'password_reset_requested_at', type: 'timestamp', nullable: true })
   passwordResetRequestedAt: Date | null;
+
+  @Column({ name: 'avatar_url', type: 'text', nullable: true })
+  avatarUrl: string | null;
+
+  @Column({ name: 'password_change_token', type: 'varchar', nullable: true })
+  passwordChangeToken: string | null;
+
+  @Column({ name: 'password_change_expires_at', type: 'timestamp', nullable: true })
+  passwordChangeExpiresAt: Date | null;
+
+  @Column({ name: 'password_change_pending_hash', type: 'text', nullable: true })
+  passwordChangePendingHash: string | null;
 }

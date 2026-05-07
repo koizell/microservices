@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EmailService } from './email.service';
 import { User } from './user.entity';
-import { CreateUserDto } from './user.dto';
+import { CreateUserDto, UpdateProfileDto, RequestPasswordChangeDto } from './user.dto';
 
 function normalizePublicBaseUrl(value: string | undefined, fallback: string) {
 	const candidate = String(value ?? fallback)
@@ -192,6 +192,76 @@ export class UserService {
 				: existing.accountType,
 		});
 		return await this.userRepository.save(updated);
+	}
+
+	async updateProfile(id: string, dto: UpdateProfileDto): Promise<{ ok: boolean; user?: User; reason?: string }> {
+		const existing = await this.userRepository.findOneBy({ id });
+		if (!existing) {
+			return { ok: false, reason: 'not_found' };
+		}
+		// Si se intenta cambiar el nombre, se requiere contraseña actual
+		if (dto.name !== undefined) {
+			if (!dto.currentPassword) {
+				return { ok: false, reason: 'password_required' };
+			}
+			if (existing.password !== dto.currentPassword) {
+				return { ok: false, reason: 'wrong_current_password' };
+			}
+			existing.name = dto.name.trim();
+		}
+		if (dto.avatarUrl !== undefined) existing.avatarUrl = dto.avatarUrl || null;
+		const saved = await this.userRepository.save(existing);
+		return { ok: true, user: saved };
+	}
+
+	async requestPasswordChange(id: string, dto: RequestPasswordChangeDto): Promise<{ ok: boolean; reason?: string; emailSent?: boolean; previewUrl?: string }> {
+		const user = await this.userRepository.findOneBy({ id });
+		if (!user) return { ok: false, reason: 'not_found' };
+
+		if (user.password !== dto.currentPassword) {
+			return { ok: false, reason: 'wrong_current_password' };
+		}
+
+		const token = randomBytes(24).toString('hex');
+		user.passwordChangeToken = token;
+		user.passwordChangeExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 min
+		user.passwordChangePendingHash = dto.newPassword;
+		await this.userRepository.save(user);
+
+		const changeUrl = this.buildPasswordChangeUrl(token);
+		const mailResult = await this.emailService.sendPasswordChangeConfirmEmail({
+			to: user.email,
+			name: user.name,
+			changeUrl,
+		});
+
+		return {
+			ok: true,
+			emailSent: mailResult.sent,
+			reason: mailResult.reason,
+			previewUrl: mailResult.sent ? undefined : changeUrl,
+		};
+	}
+
+	async confirmPasswordChange(token: string): Promise<{ ok: boolean; reason?: string }> {
+		const user = await this.userRepository.findOne({ where: { passwordChangeToken: token } });
+		if (!user) return { ok: false, reason: 'invalid' };
+		if (!user.passwordChangeExpiresAt || user.passwordChangeExpiresAt.getTime() < Date.now()) {
+			return { ok: false, reason: 'expired' };
+		}
+		if (!user.passwordChangePendingHash) return { ok: false, reason: 'invalid' };
+
+		user.password = user.passwordChangePendingHash;
+		user.passwordChangeToken = null;
+		user.passwordChangeExpiresAt = null;
+		user.passwordChangePendingHash = null;
+		await this.userRepository.save(user);
+		return { ok: true };
+	}
+
+	private buildPasswordChangeUrl(token: string) {
+		const baseUrl = normalizePublicBaseUrl(process.env.APP_BASE_URL, 'http://localhost:3009');
+		return `${baseUrl}/?changePasswordToken=${encodeURIComponent(token)}`;
 	}
 
 	async remove(id: string): Promise<User | null> {

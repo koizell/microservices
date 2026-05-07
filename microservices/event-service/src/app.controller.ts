@@ -1,5 +1,7 @@
-import { Body, Controller, Delete, Get, Header, Headers, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Headers, Param, ParseUUIDPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { AppService } from './app.service';
+import { Roles } from './decorators/roles.decorator';
+import { RoleGuard } from './guards/role.guard';
 
 @Controller('events')
 export class AppController {
@@ -1132,7 +1134,7 @@ export class AppController {
         if (deleteButton) {
           deleteButton.onclick = async function() {
           if (!confirm('Eliminar evento?')) return;
-          const response = await fetch(api + '/' + event.id, { method: 'DELETE' });
+          const response = await fetch(api + '/' + event.id, { method: 'DELETE', headers: authHeaders() });
           const payload = await response.json().catch(function(){ return {}; });
           if (!response.ok) {
             listHintActive = false;
@@ -1208,7 +1210,7 @@ export class AppController {
 
       const response = await fetch(url, {
         method: method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       });
       const payload = await response.json().catch(function(){ return {}; });
@@ -1289,7 +1291,10 @@ export class AppController {
   }
 
   @Post('data')
+  @UseGuards(RoleGuard)
+  @Roles('admin')
   async create(
+    @Req() req: any,
     @Body()
     event: {
       title: string;
@@ -1302,11 +1307,19 @@ export class AppController {
       activeWeekdays?: string[];
     },
   ) {
-    return await this.appService.create(event);
+    const user = req?.user || {};
+    return await this.appService.create(event, {
+      id: user.sub || user.id,
+      name: user.name,
+      email: user.email,
+    });
   }
 
   @Put('data/:id')
+  @UseGuards(RoleGuard)
+  @Roles('admin')
   async update(
+    @Req() req: any,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body()
     event: {
@@ -1320,11 +1333,21 @@ export class AppController {
       activeWeekdays?: string[];
     },
   ) {
-    return await this.appService.update(id, event);
+    const user = req?.user || {};
+    return await this.appService.update(id, event, {
+      id: user.sub || user.id,
+      email: user.email,
+    });
   }
 
   @Delete('data/:id')
-  async remove(@Param('id', new ParseUUIDPipe()) id: string) {
-    return await this.appService.remove(id);
+  @UseGuards(RoleGuard)
+  @Roles('admin')
+  async remove(@Req() req: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    const user = req?.user || {};
+    return await this.appService.remove(id, {
+      id: user.sub || user.id,
+      email: user.email,
+    });
   }
 }

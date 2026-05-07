@@ -150,6 +150,20 @@ export class NotificationService implements OnModuleInit {
     return await this.emailService.sendPasswordResetEmail(params);
   }
 
+  async sendPasswordChangeConfirmEmail(params: {
+    to: string;
+    name: string;
+    changeUrl: string;
+  }) {
+    await this.create({
+      message: `Confirmacion de cambio de contrasena solicitada para ${params.name}`,
+      recipient: params.to,
+      read: false,
+    });
+
+    return await this.emailService.sendPasswordChangeConfirmEmail(params);
+  }
+
   async getTicketCampaignOptions(options?: TicketCampaignOptionsFilter): Promise<TicketCampaignOption[]> {
     const organizerFilter = this.normalizeOrganizerFilter(options);
     const includeInactive = this.isTruthy(options?.includeInactive);

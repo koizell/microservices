@@ -73,6 +73,9 @@ const EVENT_SCHEMA_COLUMNS = [
   { legacyName: 'endTime', columnName: 'end_time', definition: "VARCHAR(5) NOT NULL DEFAULT '18:00'" },
   { legacyName: null, columnName: 'description', definition: 'TEXT NULL' },
   { legacyName: 'activeWeekdays', columnName: 'active_weekdays', definition: 'TEXT NULL' },
+  { legacyName: null, columnName: 'organizer_id', definition: 'VARCHAR(120) NULL' },
+  { legacyName: null, columnName: 'organizer_name', definition: 'VARCHAR(200) NULL' },
+  { legacyName: null, columnName: 'organizer_email', definition: 'VARCHAR(255) NULL' },
   { legacyName: 'isArchived', columnName: 'is_archived', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
   { legacyName: 'archivedAt', columnName: 'archived_at', definition: 'TIMESTAMP NULL' },
   { legacyName: 'createdAt', columnName: 'created_at', definition: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP' },
@@ -91,6 +94,9 @@ type EventInput = Partial<Event> & {
 type EventViewerContext = {
   role: string;
   isAuthenticated: boolean;
+  organizerId?: string;
+  organizerName?: string;
+  organizerEmail?: string;
 };
 
 type OwnedOrderSource = {
@@ -339,10 +345,20 @@ export class AppService implements OnModuleInit {
       const decoded = this.jwtService.verify(token, { secret }) as {
         accountType?: unknown;
         role?: unknown;
+        sub?: unknown;
+        id?: unknown;
+        name?: unknown;
+        email?: unknown;
       };
+      const organizerId = String(decoded?.sub ?? decoded?.id ?? '').trim();
+      const organizerName = String(decoded?.name ?? '').trim();
+      const organizerEmail = String(decoded?.email ?? '').trim().toLowerCase();
       return {
         role: this.normalizeRole(String(decoded?.accountType ?? decoded?.role ?? 'guest')),
         isAuthenticated: true,
+        organizerId: organizerId || undefined,
+        organizerName: organizerName || undefined,
+        organizerEmail: organizerEmail || undefined,
       };
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'token invalido';
@@ -454,6 +470,22 @@ export class AppService implements OnModuleInit {
 
   private async filterEventsForViewer(events: Event[], authorization?: string): Promise<Event[]> {
     const viewer = this.resolveViewerContext(authorization);
+
+    if (viewer.isAuthenticated && viewer.role === 'admin') {
+      const organizerId = viewer.organizerId;
+      const organizerEmail = viewer.organizerEmail;
+      if (!organizerId && !organizerEmail) {
+        return [];
+      }
+      return events.filter((event) => {
+        const eventOrganizerId = String(event.organizerId || '').trim();
+        const eventOrganizerEmail = String(event.organizerEmail || '').trim().toLowerCase();
+        if (organizerId && eventOrganizerId === organizerId) return true;
+        if (organizerEmail && eventOrganizerEmail === organizerEmail) return true;
+        return false;
+      });
+    }
+
     if (!viewer.isAuthenticated || viewer.role !== 'standard') {
       return events;
     }
@@ -523,8 +555,17 @@ export class AppService implements OnModuleInit {
     };
   }
 
-  async create(event: EventInput) {
-    const newEvent = this.eventRepository.create(this.buildEventValues(event));
+  async create(event: EventInput, organizer?: { id?: string; name?: string; email?: string }) {
+    const values = this.buildEventValues(event);
+    const organizerId = String(organizer?.id || '').trim();
+    const organizerName = String(organizer?.name || '').trim();
+    const organizerEmail = String(organizer?.email || '').trim().toLowerCase();
+    const newEvent = this.eventRepository.create({
+      ...values,
+      organizerId: organizerId || null,
+      organizerName: organizerName || null,
+      organizerEmail: organizerEmail || null,
+    });
     const saved = await this.eventRepository.save(newEvent);
     return this.toResponse(saved);
   }
@@ -580,11 +621,13 @@ export class AppService implements OnModuleInit {
     };
   }
 
-  async update(id: string, event: EventInput) {
+  async update(id: string, event: EventInput, organizer?: { id?: string; email?: string }) {
     const existing = await this.eventRepository.findOneBy({ id });
     if (!existing) {
       throw new NotFoundException('Event not found');
     }
+
+    this.assertOrganizerOwnsEvent(existing, organizer);
 
     Object.assign(existing, this.buildEventValues(event, existing));
     existing.isArchived = false;
@@ -593,13 +636,32 @@ export class AppService implements OnModuleInit {
     return this.toResponse(saved);
   }
 
-  async remove(id: string) {
+  async remove(id: string, organizer?: { id?: string; email?: string }) {
     const existing = await this.eventRepository.findOneBy({ id });
     if (!existing) {
       return null;
     }
+    this.assertOrganizerOwnsEvent(existing, organizer);
     const response = this.toResponse(existing);
     await this.eventRepository.remove(existing);
     return response;
+  }
+
+  private assertOrganizerOwnsEvent(event: Event, organizer?: { id?: string; email?: string }) {
+    const requesterId = String(organizer?.id || '').trim();
+    const requesterEmail = String(organizer?.email || '').trim().toLowerCase();
+    if (!requesterId && !requesterEmail) {
+      throw new BadRequestException('Organizer context is required');
+    }
+    const ownerId = String(event.organizerId || '').trim();
+    const ownerEmail = String(event.organizerEmail || '').trim().toLowerCase();
+    if (!ownerId && !ownerEmail) {
+      throw new BadRequestException('Este evento no tiene dueno asignado. Asignalo manualmente antes de modificarlo.');
+    }
+    const matchesId = requesterId && ownerId && requesterId === ownerId;
+    const matchesEmail = requesterEmail && ownerEmail && requesterEmail === ownerEmail;
+    if (!matchesId && !matchesEmail) {
+      throw new NotFoundException('Event not found');
+    }
   }
 }

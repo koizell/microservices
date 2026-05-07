@@ -23,3 +23,5 @@ Thumbs.db
 *.tsbuildinfo
 .copilot-test-*.json
 **/.copilot-test-*.json
+.claude/
+

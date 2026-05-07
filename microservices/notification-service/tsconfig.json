@@ -10,7 +10,7 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "types": ["node"],
+    "types": ["node", "jest"],
     "incremental": false
   },
   "include": ["src/**/*.ts"],

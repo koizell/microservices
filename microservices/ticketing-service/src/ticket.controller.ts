@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
-import { BadRequestException, Body, Controller, Delete, Get, Header, Param, ParseUUIDPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { TicketService } from './ticket.service';
+import { MercadoPagoService } from './mercadopago.service';
 import { RoleGuard } from './guards/role.guard';
 import { Roles } from './decorators/roles.decorator';
 
@@ -8,7 +9,10 @@ const HEIC2ANY_BROWSER_BUNDLE = readFileSync(require.resolve('heic2any/dist/heic
 
 @Controller('tickets')
 export class TicketController {
-  constructor(private readonly ticketService: TicketService) {}
+  constructor(
+    private readonly ticketService: TicketService,
+    private readonly mpService: MercadoPagoService,
+  ) {}
 
   @Get('health')
   status() {
@@ -288,12 +292,21 @@ export class TicketController {
     table{width:100%;border-collapse:collapse;margin-top:10px}
     th,td{padding:9px 8px;border-bottom:1px solid #edf2f8;text-align:left;font-size:13px}
     th{font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:#64748b}
-    .typeEditor{display:grid;gap:12px;margin-top:12px;padding:14px;border:1px solid #e7edf7;border-radius:16px;background:linear-gradient(180deg,#fff 0%,#f8fbff 100%)}
+    .typeEditor{display:grid;gap:16px;margin-top:12px;padding:18px;border:1px solid #e7edf7;border-radius:18px;background:linear-gradient(180deg,#fff 0%,#f8fbff 100%)}
     .typeEditorHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
     .typeEditorTitle{display:grid;gap:4px}
     .typeEditorTitle h3{margin:0;font-size:17px;letter-spacing:-.01em}
     .typeEditorActions{display:flex;gap:8px;flex-wrap:wrap}
-    .typeImageRow{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px;align-items:center;padding:12px;border:1px solid #e7edf7;border-radius:14px;background:#fff}
+    .typeEditorLayout{display:grid;gap:14px}
+    .typeEditorBlock{display:grid;gap:12px;padding:14px;border:1px solid #e7edf7;border-radius:16px;background:#fff}
+    .typeEditorBlockHead{display:grid;gap:5px}
+    .typeEditorEyebrow{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#64748b}
+    .typeEditorBlockTitle{margin:0;font-size:16px;letter-spacing:-.02em;color:#0f172a}
+    .typeEditorBlockCopy{margin:0;font-size:13px;line-height:1.5;color:#64748b}
+    .typeEditorGrid{display:grid;gap:10px}
+    .typeEditorGridMain{grid-template-columns:repeat(4,minmax(0,1fr))}
+    .typeEditorGridEvent{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr) minmax(0,.9fr)}
+    .typeImageRow{display:grid;grid-template-columns:148px minmax(0,1fr);gap:16px;align-items:flex-start;padding:14px;border:1px solid #e7edf7;border-radius:16px;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%)}
     .typeImagePreview{width:132px;height:96px;border-radius:14px;border:1px solid #dbe5f3;background:linear-gradient(160deg,#dbeafe 0%,#eff6ff 55%,#f8fafc 100%);overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center;color:#64748b;font-weight:800;font-size:12px;line-height:1.4;padding:8px;cursor:pointer}
     .typeImagePreview img{width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;object-position:center;display:block;margin:0 auto}
     .typeImagePreview.empty img{display:none}
@@ -303,7 +316,7 @@ export class TicketController {
     .typeImagePreview.is-tall img{width:auto;height:100%;max-width:100%}
     .typeImagePreview.is-square{padding:8px 12px}
     .typeImageInput{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
-    .typeImageControls{display:grid;gap:8px;min-width:0}
+    .typeImageControls{display:grid;gap:10px;min-width:0;align-content:start}
     .typeImageToolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     .typeImagePicker{display:inline-flex;align-items:center;justify-content:center;min-width:132px;text-decoration:none;background:#fff;color:#1e3a8a;border:1px solid #bfdbfe;font-weight:800;cursor:pointer}
     .typeImageFileName{min-width:0;font-size:13px;color:#475569;font-weight:600;word-break:break-word}
@@ -365,7 +378,69 @@ export class TicketController {
     .kpi .label{font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.03em}
     .kpi .value{margin-top:6px;font-size:24px;font-weight:800}
 
+    /* ── Catalogo cliente: filtros ── */
+    .client-filter-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding:10px 12px;background:#f8faff;border:1px solid #dde6f2;border-radius:12px}
+    .client-filter-bar input,.client-filter-bar select{height:36px;border-radius:8px;border:1px solid #c8d4e6;padding:0 10px;font:inherit;font-size:13px;background:#fff;flex:1;min-width:120px}
+    .client-filter-bar select{min-width:160px;max-width:200px}
+    .client-filter-bar input:focus,.client-filter-bar select:focus{outline:2px solid #93c5fd;border-color:#93c5fd}
+    /* ── Catalogo cliente: grid compact ── */
+    .catalog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:10px}
+    .cc-card{position:relative;background:#fff;border:1px solid #dde6f2;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;transition:box-shadow .15s,transform .15s;cursor:default}
+    .cc-card:hover{box-shadow:0 8px 28px rgba(15,23,42,.14);transform:translateY(-2px)}
+    .cc-hover-overlay{position:absolute;inset:0;background:rgba(15,23,42,.93);border-radius:12px;padding:12px 13px;opacity:0;pointer-events:none;transition:opacity .18s ease;display:flex;flex-direction:column;gap:6px;z-index:20;overflow:hidden}
+    .cc-card:hover .cc-hover-overlay{opacity:1;pointer-events:all}
+    .cc-ho-name{font-size:13px;font-weight:800;color:#fff;line-height:1.2;padding-bottom:7px;border-bottom:1px solid rgba(255,255,255,.13);margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .cc-ho-price{font-size:17px;font-weight:900;color:#f97316;letter-spacing:-.01em}
+    .cc-ho-rows{display:flex;flex-direction:column;gap:4px;flex:1}
+    .cc-ho-row{display:flex;gap:5px;font-size:11px;line-height:1.4;align-items:baseline}
+    .cc-ho-lbl{color:#94a3b8;min-width:70px;flex-shrink:0}
+    .cc-ho-val{color:#f1f5f9;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+    .btn-cart-ov{margin-top:auto;width:100%;background:linear-gradient(135deg,#e85d04,#dc2f02);color:#fff;border:0;border-radius:8px;padding:7px 0;font-size:12px;font-weight:800;cursor:pointer;transition:opacity .15s;flex-shrink:0}
+    .btn-cart-ov:hover{opacity:.87}
+    .btn-cart-ov.in-cart{background:linear-gradient(135deg,#16a34a,#166534)}
+    .btn-cart-ov:disabled{background:#475569;cursor:not-allowed;opacity:.55}
+    .cc-img{height:120px;background:linear-gradient(160deg,#dbeafe 0%,#f8fafc 100%);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0}
+    .cc-img img{width:100%;height:100%;object-fit:cover;display:block}
+    .cc-img-fallback{font-size:11px;font-weight:700;color:#94a3b8;text-align:center;padding:8px;line-height:1.4}
+    .cc-body{padding:9px 10px;display:flex;flex-direction:column;gap:4px;flex:1}
+    .cc-name{font-size:13px;font-weight:800;color:#0f172a;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .cc-event{font-size:11px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .cc-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
+    .cc-chip{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.02em}
+    .cc-chip.cat{background:#fef3c7;color:#92400e}
+    .cc-chip.avail-ok{background:#dcfce7;color:#166534}
+    .cc-chip.avail-low{background:#fff7ed;color:#c2410c}
+    .cc-chip.avail-empty{background:#fee2e2;color:#b91c1c}
+    .cc-footer{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding:8px 10px;border-top:1px solid #edf2f8}
+    .cc-price{font-size:14px;font-weight:800;color:#1e3a8a}
+    .cc-avail{font-size:10px;color:#64748b}
+    .btn-cart{height:30px;padding:0 10px;border-radius:7px;background:linear-gradient(135deg,#e85d04,#dc2f02);color:#fff;border:0;font-weight:800;font-size:11px;cursor:pointer;transition:opacity .15s;white-space:nowrap}
+    .btn-cart:hover{opacity:.88}
+    .btn-cart:disabled{opacity:.4;cursor:not-allowed}
+    .btn-cart.in-cart{background:linear-gradient(135deg,#16a34a,#166534)}
+    /* ── Carrito en panel-orders ── */
+    .cart-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+    .cart-head h3{margin:0;font-size:15px;font-weight:800}
+    .cart-item{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid #dde6f2;border-radius:10px;background:#fff;margin-bottom:7px}
+    .cart-item input[type=checkbox]{width:15px;height:15px;accent-color:#e85d04;flex-shrink:0;cursor:pointer}
+    .cart-item-img{width:42px;height:42px;border-radius:8px;overflow:hidden;background:#eef2f9;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+    .cart-item-img img{width:100%;height:100%;object-fit:cover}
+    .cart-item-info{flex:1;min-width:0}
+    .cart-item-name{font-size:13px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .cart-item-sub{font-size:11px;color:#64748b}
+    .cart-qty{width:48px;height:28px;border:1px solid #c8d4e6;border-radius:7px;padding:0 5px;font:inherit;font-size:13px;text-align:center}
+    .cart-item-price{font-size:13px;font-weight:800;color:#1e3a8a;min-width:64px;text-align:right;flex-shrink:0}
+    .btn-remove-cart{width:26px;height:26px;border:0;background:none;cursor:pointer;color:#94a3b8;font-size:16px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:6px;flex-shrink:0}
+    .btn-remove-cart:hover{background:#fee2e2;color:#dc2626}
+    .cart-empty{padding:20px;text-align:center;color:#94a3b8;font-size:13px;border:1px dashed #c8d4e6;border-radius:10px}
+    .cart-footer-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 0 4px;border-top:1px solid #e5edf8;margin-top:4px;gap:10px;flex-wrap:wrap}
+    .cart-total-label{font-size:15px;font-weight:800;color:#0f172a}
+    .orders-divider{border:none;border-top:1.5px solid #e5edf8;margin:16px 0}
+    .orders-history-head{font-size:14px;font-weight:800;color:#374151;margin:0 0 8px}
+    /* ── */
     @media(max-width:1180px){
+      .typeEditorGridMain{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .typeEditorGridEvent{grid-template-columns:repeat(2,minmax(0,1fr))}
       .typeCard{grid-template-columns:minmax(250px,280px) minmax(0,1fr)}
     }
     @media(max-width:980px){
@@ -376,6 +451,7 @@ export class TicketController {
       .typeCardMedia{min-height:220px;padding:10px}
       .typeCardMedia.is-tall{min-height:260px;padding:10px 22px}
       .typeCardHead,.typeCardDetails{grid-template-columns:1fr}
+      .typeEditorGridMain,.typeEditorGridEvent{grid-template-columns:1fr}
       .typeImageRow{grid-template-columns:1fr}
       .typeImagePreview{width:100%;max-width:172px}
     }
@@ -400,8 +476,9 @@ export class TicketController {
 
     <nav class="tabs">
       <button id="tabCatalog" class="active" onclick="showTab('catalog')">Catalogo</button>
-      <button id="tabBuy" onclick="showTab('buy')">Compra</button>
+      <button id="tabBuy" onclick="showTab('buy')" style="display:none">Compra</button>
       <button id="tabOrders" onclick="showTab('orders')">Ordenes</button>
+      <button id="tabTicket" onclick="showTab('ticket')" style="display:none">Ticket</button>
       <button id="tabSummary" onclick="showTab('summary')">Resumen</button>
     </nav>
 
@@ -422,37 +499,78 @@ export class TicketController {
               <button class="ghost" type="button" onclick="loadTypes()">Recargar</button>
             </div>
           </div>
-          <div class="grid">
-            <input id="typeName" placeholder="Nombre (General, VIP, Taller)">
-            <input id="typePrice" type="number" min="1" step="0.01" placeholder="Precio">
-            <input id="typeQty" type="number" min="1" step="1" placeholder="Cantidad total">
-            <input id="typeMaxPerson" type="number" min="0" step="1" placeholder="Max por persona (0 = sin limite)">
-            <select id="typeEventId" style="height:40px;border-radius:10px;border:1px solid #c8d4e6;padding:0 11px;font:inherit;font-size:14px">
-              <option value="">-- Sin evento --</option>
-            </select>
-            <input id="typeLocation" placeholder="Ubicacion del evento (auto)" readonly style="background:#f8fafc;color:#64748b">
-            <input id="typeCategory" placeholder="Categoria (opcional)">
-          </div>
-          <div class="typeImageRow">
-            <label id="typeImagePreview" class="typeImagePreview empty" for="typeImageFile">
-              <img id="typeImagePreviewImg" alt="Imagen del equipo">
-              <span id="typeImagePreviewText">Sin foto guardada</span>
-            </label>
-            <div class="typeImageControls">
-              <input id="typeImageFile" class="typeImageInput" type="file" accept=".jpg,.jpeg,.png,.webp,.svg,.heic,.heif,image/jpeg,image/png,image/webp,image/svg+xml,image/heic,image/heif">
-              <div class="typeImageToolbar">
-                <label class="typeImagePicker" for="typeImageFile">Elegir foto</label>
-                <div id="typeImageFileName" class="typeImageFileName">Ningun archivo seleccionado.</div>
+          <div class="typeEditorLayout">
+            <section class="typeEditorBlock">
+              <div class="typeEditorBlockHead">
+                <span class="typeEditorEyebrow">Datos principales</span>
+                <h4 class="typeEditorBlockTitle">Configura el ticket</h4>
+                <p class="typeEditorBlockCopy">Define nombre, precio, cupo total y el limite de compra por persona.</p>
               </div>
-              <div id="typeImageState" class="small">JPG, PNG, WebP, SVG o HEIC/HEIF. Convertimos HEIC localmente y ajustamos resolucion, peso y encuadre automaticamente cuando eliges la foto.</div>
-              <div class="typeImageButtons">
-                <button id="removeTypeImageBtn" class="ghost" type="button" onclick="removeTypeImage()" disabled>Quitar foto</button>
+              <div class="typeEditorGrid typeEditorGridMain">
+                <input id="typeName" placeholder="Nombre (General, VIP, Taller)">
+                <input id="typePrice" type="number" min="1" step="0.01" placeholder="Precio">
+                <input id="typeQty" type="number" min="1" step="1" placeholder="Cantidad total">
+                <input id="typeMaxPerson" type="number" min="0" step="1" placeholder="Max por persona (0 = sin limite)">
               </div>
-            </div>
+            </section>
+
+            <section class="typeEditorBlock">
+              <div class="typeEditorBlockHead">
+                <span class="typeEditorEyebrow">Evento y clasificacion</span>
+                <h4 class="typeEditorBlockTitle">Relaciona el ticket con el evento</h4>
+                <p class="typeEditorBlockCopy">Selecciona el evento, revisa la ubicacion sugerida y agrega una categoria si la necesitas.</p>
+              </div>
+              <div class="typeEditorGrid typeEditorGridEvent">
+                <select id="typeEventId" style="height:40px;border-radius:10px;border:1px solid #c8d4e6;padding:0 11px;font:inherit;font-size:14px">
+                  <option value="">-- Sin evento --</option>
+                </select>
+                <input id="typeLocation" placeholder="Ubicacion del evento (auto)" readonly style="background:#f8fafc;color:#64748b">
+                <input id="typeCategory" placeholder="Categoria (opcional)">
+              </div>
+            </section>
+
+            <section class="typeEditorBlock">
+              <div class="typeEditorBlockHead">
+                <span class="typeEditorEyebrow">Imagen del ticket</span>
+                <h4 class="typeEditorBlockTitle">Previsualiza la foto del equipo</h4>
+                <p class="typeEditorBlockCopy">Sube una imagen clara para que el ticket se vea mejor en catalogo y en la credencial del asistente.</p>
+              </div>
+              <div class="typeImageRow">
+                <label id="typeImagePreview" class="typeImagePreview empty" for="typeImageFile">
+                  <img id="typeImagePreviewImg" alt="Imagen del equipo">
+                  <span id="typeImagePreviewText">Sin foto guardada</span>
+                </label>
+                <div class="typeImageControls">
+                  <input id="typeImageFile" class="typeImageInput" type="file" accept=".jpg,.jpeg,.png,.webp,.svg,.heic,.heif,image/jpeg,image/png,image/webp,image/svg+xml,image/heic,image/heif">
+                  <div class="typeImageToolbar">
+                    <label class="typeImagePicker" for="typeImageFile">Elegir foto</label>
+                    <div id="typeImageFileName" class="typeImageFileName">Ningun archivo seleccionado.</div>
+                  </div>
+                  <div id="typeImageState" class="small">JPG, PNG, WebP, SVG o HEIC/HEIF. Convertimos HEIC localmente y ajustamos resolucion, peso y encuadre automaticamente cuando eliges la foto.</div>
+                  <div class="typeImageButtons">
+                    <button id="removeTypeImageBtn" class="ghost" type="button" onclick="removeTypeImage()" disabled>Quitar foto</button>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
         <div id="typesOverview" class="typeOverview"></div>
         <div id="typesCards" class="typeCards"></div>
+        <!-- Vista cliente: filtros y grid compact (oculto para admin) -->
+        <div id="clientFilterBar" class="client-filter-bar" style="display:none">
+          <input id="cfSearch" type="text" placeholder="Buscar por nombre..." oninput="filterClientCatalog()">
+          <input id="cfPriceMin" type="number" min="0" placeholder="Precio min" oninput="filterClientCatalog()" style="max-width:130px">
+          <input id="cfPriceMax" type="number" min="0" placeholder="Precio max" oninput="filterClientCatalog()" style="max-width:130px">
+          <select id="cfSort" onchange="filterClientCatalog()">
+            <option value="">Ordenar por...</option>
+            <option value="price-asc">Precio: menor a mayor</option>
+            <option value="price-desc">Precio: mayor a menor</option>
+            <option value="name-asc">Nombre A-Z</option>
+            <option value="avail-desc">Mas disponibles</option>
+          </select>
+        </div>
+        <div id="clientCatalogGrid" class="catalog-grid" style="display:none"></div>
       </div>
     </section>
 
@@ -481,7 +599,26 @@ export class TicketController {
 
     <section id="panel-orders" class="panel">
       <div class="card">
-        <h2>Ordenes</h2>
+        <!-- Carrito (solo participante) -->
+        <div id="cartSection" style="display:none">
+          <div class="cart-head">
+            <h3 id="cartTitle">Carrito</h3>
+            <button class="ghost" style="height:30px;padding:0 10px;font-size:12px" onclick="clearCart()">Vaciar carrito</button>
+          </div>
+          <div id="cartItems"></div>
+          <div id="cartEmpty" class="cart-empty">Tu carrito esta vacio. Agrega tickets desde el Catalogo.</div>
+          <div id="cartFooter" class="cart-footer-bar" style="display:none">
+            <span class="cart-total-label">Total seleccionado: <span id="cartTotal">$0.00</span></span>
+            <button id="purchaseBtn" class="primary" style="height:36px;padding:0 16px;font-size:13px" onclick="purchaseSelected()">Comprar seleccionados</button>
+          </div>
+          <div id="cartMsg" class="msg"></div>
+          <hr class="orders-divider">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px">
+            <p class="orders-history-head" style="margin:0">Historial de ordenes</p>
+            <button id="verifyPaymentsBtn" class="ghost" style="height:30px;padding:0 12px;font-size:12px;background:#eff6ff;border-color:#3b82f6;color:#1d4ed8" onclick="verifyPendingPayments()">Verificar mis pagos</button>
+          </div>
+        </div>
+        <h2 id="ordersHeading">Ordenes</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <input id="ordersEmail" type="email" placeholder="Filtrar por correo de cuenta (solo admin)">
           <input id="ordersLimit" type="number" min="1" max="100" value="20">
@@ -502,6 +639,20 @@ export class TicketController {
           </thead>
           <tbody id="ordersRows"></tbody>
         </table>
+      </div>
+    </section>
+
+    <section id="panel-ticket" class="panel">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <div>
+            <h2 style="margin:0">Tickets Comprados</h2>
+            <div class="small" style="margin-top:4px">Aqui aparecen los tickets que ya tienen pago aprobado.</div>
+          </div>
+          <button class="ghost" type="button" onclick="loadPurchased()">Actualizar</button>
+        </div>
+        <div id="ticketMsg" class="msg"></div>
+        <div id="ticketPurchasedGrid" class="catalog-grid" style="display:grid"></div>
       </div>
     </section>
 
@@ -598,6 +749,7 @@ export class TicketController {
     let attemptedNameRefresh = false;
     let userRole = 'guest';
     let typesCache = [];
+    let cart = {}; // { [ticketTypeId]: { type: object, qty: number } }
     let eventsCache = [];
     let currentTypeImageData = '';
     const MAX_TICKET_IMAGE_SIZE = 1800000;
@@ -609,7 +761,7 @@ export class TicketController {
         return ['catalog', 'orders', 'summary'].includes(tab);
       }
       if (userRole === 'standard') {
-        return ['catalog', 'buy', 'orders'].includes(tab);
+        return ['catalog', 'buy', 'orders', 'ticket'].includes(tab);
       }
       return tab === 'catalog';
     }
@@ -652,6 +804,7 @@ export class TicketController {
         succeeded: 'Pagado',
         approved: 'Aprobado',
         pending: 'Pendiente',
+        pending_mp: '⏳ Verificando pago',
         processing: 'En proceso',
         requires_action: 'Requiere accion',
         declined: 'Rechazado',
@@ -1399,16 +1552,35 @@ export class TicketController {
 
     function showTab(name) {
       if (!canAccessTab(name)) {
-        name = userRole === 'admin' ? 'catalog' : (userRole === 'standard' ? 'buy' : 'catalog');
+        name = userRole === 'admin' ? 'catalog' : 'catalog';
       }
 
-      ['catalog','buy','orders','summary'].forEach(function(tab){
+      ['catalog','buy','orders','ticket','summary'].forEach(function(tab){
         document.getElementById('panel-' + tab).classList.remove('active');
         document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.remove('active');
       });
       document.getElementById('panel-' + name).classList.add('active');
       document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
-      if (name === 'orders') loadOrders();
+      if (name === 'ticket') {
+        loadPurchased();
+      }
+      if (name === 'orders') {
+        if (userRole === 'standard') {
+          renderCartPanel();
+          // Auto-verificar pagos pendientes al abrir la pestaña
+          setTimeout(function() {
+            const rows = document.querySelectorAll('#ordersRows tr');
+            const hasPendingMp = Array.from(rows).some(function(tr) {
+              return tr.textContent && tr.textContent.includes('Verificando pago');
+            });
+            if (hasPendingMp) {
+              verifyPendingPayments();
+            }
+          }, 800);
+        } else {
+          loadOrders();
+        }
+      }
       if (name === 'summary') loadSummary();
     }
 
@@ -1416,19 +1588,20 @@ export class TicketController {
       const isAdmin = userRole === 'admin';
       const isStandard = userRole === 'standard';
       document.getElementById('createTypeForm').style.display = isAdmin ? 'grid' : 'none';
+      document.getElementById('typesOverview').style.display = isAdmin ? 'grid' : 'none';
+      document.getElementById('typesCards').style.display = isAdmin ? 'grid' : 'none';
+      document.getElementById('clientFilterBar').style.display = isStandard ? 'flex' : 'none';
+      document.getElementById('clientCatalogGrid').style.display = isStandard ? 'grid' : 'none';
+      document.getElementById('cartSection').style.display = isStandard ? 'block' : 'none';
+      document.getElementById('ordersHeading').style.display = isStandard ? 'none' : 'block';
       document.getElementById('ordersEmail').style.display = isAdmin ? 'inline-block' : 'none';
       document.getElementById('tabSummary').style.display = isAdmin ? 'inline-block' : 'none';
-      document.getElementById('tabBuy').style.display = isAdmin ? 'none' : (isStandard ? 'inline-block' : 'none');
+      document.getElementById('tabBuy').style.display = 'none';
       document.getElementById('tabOrders').style.display = (isAdmin || isStandard) ? 'inline-block' : 'none';
+      document.getElementById('tabTicket').style.display = isStandard ? 'inline-block' : 'none';
 
-      if (isAdmin) {
-        showTab('catalog');
-        return;
-      }
-      if (isStandard) {
-        showTab('buy');
-        return;
-      }
+      if (isAdmin) { showTab('catalog'); return; }
+      if (isStandard) { showTab('catalog'); return; }
       showTab('catalog');
     }
 
@@ -1487,7 +1660,16 @@ export class TicketController {
         setMsg('catalogMsg', '', 'info');
       }
       try {
-        const url = API + '/types' + (userRole === 'admin' ? '?includeInactive=true' : '');
+        const params = new URLSearchParams();
+        if (userRole === 'admin') {
+          params.set('includeInactive', 'true');
+          const organizerId = String(sessionUser?.sub || sessionUser?.id || '').trim();
+          const organizerEmail = String(sessionUser?.email || '').trim().toLowerCase();
+          if (organizerId) params.set('organizerId', organizerId);
+          if (organizerEmail) params.set('organizerEmail', organizerEmail);
+        }
+        const qs = params.toString();
+        const url = API + '/types' + (qs ? '?' + qs : '');
         const r = await apiFetch(url, { headers: authHeaders(), cache: 'no-store' });
         const d = await r.json().catch(function() { return []; });
         if (!r.ok) throw new Error(d.message || 'No se pudo cargar tipos');
@@ -1509,6 +1691,7 @@ export class TicketController {
           cards.appendChild(renderTypeCard(ticketType));
         });
         fillTypeSelect();
+        if (userRole === 'standard') renderClientCatalog(typesCache);
       } catch (e) {
         setMsg('catalogMsg', e.message, 'err');
       }
@@ -1607,6 +1790,373 @@ export class TicketController {
       }
     }
 
+    // ── Cart & client catalog functions ──
+
+    function getAvailableForType(t) {
+      return Math.max(0, Number(t.quantity || 0) - Number(t.quantitySold || 0));
+    }
+
+    function addToCart(typeId) {
+      const t = typesCache.find(function(x){ return x.id === typeId; });
+      if (!t) return;
+      if (cart[typeId]) {
+        const max = t.maxPerPerson > 0 ? t.maxPerPerson : getAvailableForType(t);
+        cart[typeId].qty = Math.min(cart[typeId].qty + 1, max);
+      } else {
+        cart[typeId] = { type: t, qty: 1 };
+      }
+      updateCartBadges();
+      renderClientCatalog(typesCache);
+      showTab('orders');
+    }
+
+    function removeFromCart(typeId) {
+      delete cart[typeId];
+      updateCartBadges();
+      renderClientCatalog(typesCache);
+      renderCartPanel();
+    }
+
+    function clearCart() {
+      cart = {};
+      updateCartBadges();
+      renderClientCatalog(typesCache);
+      renderCartPanel();
+    }
+
+    function updateCartBadges() {
+      const count = Object.keys(cart).length;
+      const tab = document.getElementById('tabOrders');
+      if (tab) tab.textContent = count > 0 ? ('Ordenes (' + count + ')') : 'Ordenes';
+    }
+
+    function renderClientCatalog(types) {
+      const grid = document.getElementById('clientCatalogGrid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      const active = types.filter(function(t){ return t.isActive !== false && getAvailableForType(t) > 0; });
+      if (!active.length) {
+        grid.innerHTML = '<div class="emptyTypeState">No hay tickets disponibles en este momento.</div>';
+        return;
+      }
+      const filtered = applyClientFilters(active);
+      if (!filtered.length) {
+        grid.innerHTML = '<div class="emptyTypeState">No hay tickets que coincidan con los filtros.</div>';
+        return;
+      }
+      filtered.forEach(function(t) {
+        grid.appendChild(buildCompactCard(t));
+      });
+    }
+
+    function applyClientFilters(types) {
+      const search = String((document.getElementById('cfSearch') || {value:''}).value || '').toLowerCase().trim();
+      const priceMin = Number((document.getElementById('cfPriceMin') || {value:''}).value || 0);
+      const priceMax = Number((document.getElementById('cfPriceMax') || {value:''}).value || 0);
+      const sort = (document.getElementById('cfSort') || {value:''}).value || '';
+      let result = types.filter(function(t) {
+        if (search && !String(t.name || '').toLowerCase().includes(search)) return false;
+        const price = Number(t.price || 0);
+        if (priceMin > 0 && price < priceMin) return false;
+        if (priceMax > 0 && price > priceMax) return false;
+        return true;
+      });
+      if (sort === 'price-asc') result.sort(function(a,b){ return Number(a.price||0) - Number(b.price||0); });
+      else if (sort === 'price-desc') result.sort(function(a,b){ return Number(b.price||0) - Number(a.price||0); });
+      else if (sort === 'name-asc') result.sort(function(a,b){ return String(a.name||'').localeCompare(String(b.name||'')); });
+      else if (sort === 'avail-desc') result.sort(function(a,b){ return getAvailableForType(b) - getAvailableForType(a); });
+      return result;
+    }
+
+    function filterClientCatalog() { renderClientCatalog(typesCache); }
+
+    function buildCompactCard(t) {
+      const avail = getAvailableForType(t);
+      const eventMatch = eventsCache.find(function(e){ return e.id === t.eventId; });
+      const eventTitle = eventMatch ? eventMatch.title : (t.eventId ? 'Evento vinculado' : 'Sin evento');
+      const inCart = Boolean(cart[t.id]);
+      const availClass = avail === 0 ? 'avail-empty' : (avail <= 3 ? 'avail-low' : 'avail-ok');
+      const availLabel = avail === 0 ? 'Agotado' : (avail <= 3 ? 'Pocas unidades' : 'Disponible');
+
+      const card = document.createElement('article');
+      card.className = 'cc-card';
+
+      const imgWrap = document.createElement('div');
+      imgWrap.className = 'cc-img';
+      if (t.teamImageUrl) {
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = t.teamImageUrl;
+        img.alt = t.name || 'ticket';
+        imgWrap.appendChild(img);
+      } else {
+        const fb = document.createElement('div');
+        fb.className = 'cc-img-fallback';
+        fb.textContent = t.name || 'Sin foto';
+        imgWrap.appendChild(fb);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'cc-body';
+
+      const name = document.createElement('div');
+      name.className = 'cc-name';
+      name.title = t.name || '-';
+      name.textContent = t.name || '-';
+
+      const evLabel = document.createElement('div');
+      evLabel.className = 'cc-event';
+      evLabel.title = eventTitle;
+      evLabel.textContent = eventTitle;
+
+      const chips = document.createElement('div');
+      chips.className = 'cc-chips';
+      if (t.category) {
+        const cat = document.createElement('span');
+        cat.className = 'cc-chip cat';
+        cat.textContent = t.category;
+        chips.appendChild(cat);
+      }
+      const avChip = document.createElement('span');
+      avChip.className = 'cc-chip ' + availClass;
+      avChip.textContent = availLabel;
+      chips.appendChild(avChip);
+
+      body.appendChild(name);
+      body.appendChild(evLabel);
+      body.appendChild(chips);
+
+      const footer = document.createElement('div');
+      footer.className = 'cc-footer';
+      const price = document.createElement('div');
+      price.className = 'cc-price';
+      price.textContent = '$' + Number(t.price || 0).toFixed(2);
+      const cartBtn = document.createElement('button');
+      cartBtn.className = 'btn-cart' + (inCart ? ' in-cart' : '');
+      cartBtn.textContent = inCart ? ('En carrito (' + cart[t.id].qty + ')') : 'Agregar';
+      cartBtn.disabled = avail === 0;
+      cartBtn.onclick = function() { addToCart(t.id); };
+      footer.appendChild(price);
+      footer.appendChild(cartBtn);
+
+      // ── Hover overlay ──
+      const overlay = document.createElement('div');
+      overlay.className = 'cc-hover-overlay';
+
+      const hoName = document.createElement('div');
+      hoName.className = 'cc-ho-name';
+      hoName.textContent = t.name || '-';
+
+      const hoPrice = document.createElement('div');
+      hoPrice.className = 'cc-ho-price';
+      hoPrice.textContent = '$' + Number(t.price || 0).toFixed(2);
+
+      const hoRows = document.createElement('div');
+      hoRows.className = 'cc-ho-rows';
+      function addHoRow(lbl, val) {
+        if (!val && val !== 0) return;
+        const row = document.createElement('div');
+        row.className = 'cc-ho-row';
+        const l = document.createElement('span'); l.className = 'cc-ho-lbl'; l.textContent = lbl;
+        const v = document.createElement('span'); v.className = 'cc-ho-val'; v.textContent = String(val); v.title = String(val);
+        row.appendChild(l); row.appendChild(v);
+        hoRows.appendChild(row);
+      }
+      addHoRow('Disponibles', avail + ' de ' + Number(t.quantity || 0));
+      if (Number(t.maxPerPerson) > 0) addHoRow('Máx p/persona', String(t.maxPerPerson));
+      if (t.category) addHoRow('Categoría', t.category);
+      if (eventMatch) {
+        const evDate = eventMatch.startDate
+          ? (eventMatch.endDate && eventMatch.endDate !== eventMatch.startDate ? eventMatch.startDate + ' — ' + eventMatch.endDate : eventMatch.startDate)
+          : (eventMatch.date ? String(eventMatch.date).substring(0,10) : null);
+        if (evDate) addHoRow('Fecha', evDate);
+        if (eventMatch.location) addHoRow('Lugar', eventMatch.location);
+      }
+      if (t.organizerName) addHoRow('Organizador', t.organizerName);
+
+      const ovBtn = document.createElement('button');
+      ovBtn.className = 'btn-cart-ov' + (inCart ? ' in-cart' : '');
+      ovBtn.textContent = inCart ? ('En carrito (' + cart[t.id].qty + ')') : 'Agregar al carrito';
+      ovBtn.disabled = avail === 0;
+      ovBtn.onclick = function(e) { e.stopPropagation(); addToCart(t.id); };
+
+      overlay.appendChild(hoName);
+      overlay.appendChild(hoPrice);
+      overlay.appendChild(hoRows);
+      overlay.appendChild(ovBtn);
+
+      card.appendChild(imgWrap);
+      card.appendChild(body);
+      card.appendChild(footer);
+      card.appendChild(overlay);
+      return card;
+    }
+
+    async function verifyPendingPayments() {
+      const btn = document.getElementById('verifyPaymentsBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Verificando...'; }
+      try {
+        const r = await apiFetch(API + '/mp/check-pending', { headers: authHeaders() });
+        const d = await r.json().catch(function(){ return {}; });
+        if (!r.ok) throw new Error(d.message || 'Error al verificar');
+        if (d.confirmed > 0) {
+          setMsg('cartMsg', '✅ ' + d.message + '. Actualizando...', 'ok');
+          await loadOrders();
+          renderClientCatalog(typesCache);
+        } else {
+          setMsg('cartMsg', d.message, 'info');
+        }
+      } catch (e) {
+        setMsg('cartMsg', e.message, 'err');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Verificar mis pagos'; }
+      }
+    }
+
+    function renderCartPanel() {
+      const itemsEl = document.getElementById('cartItems');
+      const emptyEl = document.getElementById('cartEmpty');
+      const footerEl = document.getElementById('cartFooter');
+      const titleEl = document.getElementById('cartTitle');
+      if (!itemsEl) return;
+      itemsEl.innerHTML = '';
+      const keys = Object.keys(cart);
+      if (titleEl) titleEl.textContent = 'Carrito (' + keys.length + ' tipos)';
+      if (!keys.length) {
+        if (emptyEl) emptyEl.style.display = 'block';
+        if (footerEl) footerEl.style.display = 'none';
+        loadOrders();
+        return;
+      }
+      if (emptyEl) emptyEl.style.display = 'none';
+      if (footerEl) footerEl.style.display = 'flex';
+      keys.forEach(function(typeId) {
+        const entry = cart[typeId];
+        const t = entry.type;
+        const avail = getAvailableForType(t);
+        const maxQty = t.maxPerPerson > 0 ? Math.min(t.maxPerPerson, avail) : avail;
+        const row = document.createElement('div');
+        row.className = 'cart-item';
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = true;
+        check.dataset.typeId = typeId;
+        check.onchange = function() { recalcCartTotal(); };
+        const imgWrap = document.createElement('div');
+        imgWrap.className = 'cart-item-img';
+        if (t.teamImageUrl) {
+          const img = document.createElement('img');
+          img.src = t.teamImageUrl;
+          img.alt = t.name || 'ticket';
+          imgWrap.appendChild(img);
+        } else {
+          imgWrap.textContent = (t.name || '?').charAt(0);
+          imgWrap.style.fontSize = '14px'; imgWrap.style.fontWeight = '800'; imgWrap.style.color = '#64748b';
+        }
+        const info = document.createElement('div');
+        info.className = 'cart-item-info';
+        const nm = document.createElement('div');
+        nm.className = 'cart-item-name';
+        nm.textContent = t.name || '-';
+        const eventMatch = eventsCache.find(function(e){ return e.id === t.eventId; });
+        const sub = document.createElement('div');
+        sub.className = 'cart-item-sub';
+        sub.textContent = (eventMatch ? eventMatch.title : 'Sin evento') + ' · $' + Number(t.price || 0).toFixed(2) + ' c/u';
+        info.appendChild(nm);
+        info.appendChild(sub);
+        const qtyInput = document.createElement('input');
+        qtyInput.type = 'number';
+        qtyInput.min = '1';
+        qtyInput.max = String(maxQty);
+        qtyInput.value = String(entry.qty);
+        qtyInput.className = 'cart-qty';
+        qtyInput.dataset.typeId = typeId;
+        qtyInput.oninput = function() {
+          const v = Math.max(1, Math.min(maxQty, Number(qtyInput.value) || 1));
+          qtyInput.value = String(v);
+          cart[typeId].qty = v;
+          const priceEl = row.querySelector('.cart-item-price');
+          if (priceEl) priceEl.textContent = '$' + (Number(t.price || 0) * v).toFixed(2);
+          recalcCartTotal();
+          updateCartBadges();
+          renderClientCatalog(typesCache);
+        };
+        const priceEl = document.createElement('div');
+        priceEl.className = 'cart-item-price';
+        priceEl.textContent = '$' + (Number(t.price || 0) * entry.qty).toFixed(2);
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn-remove-cart';
+        removeBtn.title = 'Quitar del carrito';
+        removeBtn.innerHTML = '&times;';
+        removeBtn.onclick = function() { removeFromCart(typeId); };
+        row.appendChild(check);
+        row.appendChild(imgWrap);
+        row.appendChild(info);
+        row.appendChild(qtyInput);
+        row.appendChild(priceEl);
+        row.appendChild(removeBtn);
+        itemsEl.appendChild(row);
+      });
+      recalcCartTotal();
+      loadOrders();
+    }
+
+    function recalcCartTotal() {
+      const totalEl = document.getElementById('cartTotal');
+      if (!totalEl) return;
+      let total = 0;
+      document.querySelectorAll('#cartItems .cart-item').forEach(function(row) {
+        const check = row.querySelector('input[type=checkbox]');
+        if (!check || !check.checked) return;
+        const typeId = check.dataset.typeId;
+        const entry = cart[typeId];
+        if (entry) total += Number(entry.type.price || 0) * entry.qty;
+      });
+      totalEl.textContent = '$' + total.toFixed(2);
+    }
+
+    async function purchaseSelected() {
+      setMsg('cartMsg', '', 'info');
+      if (!sessionUser?.sub) { setMsg('cartMsg', 'No hay sesion valida para comprar.', 'err'); return; }
+      const selected = [];
+      document.querySelectorAll('#cartItems .cart-item').forEach(function(row) {
+        const check = row.querySelector('input[type=checkbox]');
+        if (!check || !check.checked) return;
+        const typeId = check.dataset.typeId;
+        const entry = cart[typeId];
+        if (entry) selected.push({ typeId: typeId, qty: entry.qty, price: entry.type.price, name: entry.type.name || 'Ticket' });
+      });
+      if (!selected.length) { setMsg('cartMsg', 'Selecciona al menos un ticket para comprar.', 'err'); return; }
+
+      // Deshabilitar botón mientras se procesa
+      const buyBtn = document.getElementById('purchaseBtn');
+      if (buyBtn) { buyBtn.disabled = true; buyBtn.textContent = 'Procesando...'; }
+
+      try {
+        const r = await apiFetch(API + '/mp/create-preference', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            items: selected,
+            userId: sessionUser.sub,
+            recipientEmail: sessionUser.email || 'attendee@example.com',
+          }),
+        });
+        const d = await r.json().catch(function(){ return {}; });
+        if (!r.ok) throw new Error(d.message || 'No se pudo iniciar el pago con MercadoPago');
+
+        // Redirigir al checkout de MercadoPago
+        const checkoutUrl = d.sandbox_init_point || d.init_point;
+        if (!checkoutUrl) throw new Error('No se recibio la URL de pago de MercadoPago');
+        // Abrir en la pestaña completa (el checkout corre en un iframe, MP bloquea iframes)
+        window.open(checkoutUrl, '_blank');
+      } catch (e) {
+        setMsg('cartMsg', e.message, 'err');
+        if (buyBtn) { buyBtn.disabled = false; buyBtn.textContent = 'Comprar seleccionados'; }
+      }
+    }
+    // ── end cart functions ──
+
     async function purchase() {
       setMsg('buyMsg', '', 'info');
       if (userRole === 'admin') {
@@ -1672,6 +2222,117 @@ export class TicketController {
       }
     }
 
+    async function loadPurchased() {
+      setMsg('ticketMsg', '', 'info');
+      const grid = document.getElementById('ticketPurchasedGrid');
+      if (!grid) return;
+      grid.innerHTML = '<div class="emptyTypeState">Cargando tickets comprados...</div>';
+
+      if (userRole !== 'standard') {
+        grid.innerHTML = '<div class="emptyTypeState">Esta vista esta disponible solo para participantes.</div>';
+        return;
+      }
+
+      if (!typesCache.length) {
+        await loadTypes({ keepMessage: true });
+      }
+      if (!eventsCache.length) {
+        await loadEvents();
+      }
+
+      try {
+        const r = await apiFetch(API + '/orders?limit=100', { headers: authHeaders(), cache: 'no-store' });
+        const d = await r.json().catch(function(){ return []; });
+        if (!r.ok) throw new Error(d.message || 'No se pudieron cargar los tickets comprados');
+
+        const paidOrders = (Array.isArray(d) ? d : []).filter(function(order) {
+          const status = String(order.status || '').trim().toLowerCase();
+          return ['paid', 'approved', 'succeeded'].includes(status);
+        });
+
+        if (!paidOrders.length) {
+          grid.innerHTML = '<div class="emptyTypeState">Aun no tienes tickets comprados con pago aprobado.</div>';
+          return;
+        }
+
+        grid.innerHTML = '';
+        paidOrders.forEach(function(order) {
+          const typeInfo = typesCache.find(function(ticketType) {
+            return ticketType.id === order.ticketTypeId;
+          }) || {};
+          const eventInfo = eventsCache.find(function(event) {
+            return event.id === typeInfo.eventId;
+          }) || {};
+          const eventDateRaw = eventInfo.startDate || eventInfo.date || '';
+          const parsedEventDate = eventDateRaw ? new Date(eventDateRaw) : null;
+          const eventDate = parsedEventDate && !Number.isNaN(parsedEventDate.getTime())
+            ? parsedEventDate.toLocaleDateString()
+            : (eventDateRaw ? String(eventDateRaw).substring(0, 10) : 'Por confirmar');
+          const card = document.createElement('article');
+          card.className = 'ticketCard';
+          card.style.cssText = 'background:#fff;border:1px solid #dbe3f0;border-radius:18px;overflow:hidden;box-shadow:0 10px 24px rgba(15,23,42,.06);display:flex;flex-direction:column;min-height:100%';
+
+          const imageWrap = document.createElement('div');
+          imageWrap.style.cssText = 'position:relative;height:180px;background:linear-gradient(135deg,#0f172a,#1e3a8a);display:flex;align-items:center;justify-content:center;overflow:hidden';
+          if (typeInfo.teamImageUrl) {
+            const img = document.createElement('img');
+            img.src = typeInfo.teamImageUrl;
+            img.alt = typeInfo.name || order.ticketTypeName || 'Ticket';
+            img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+            imageWrap.appendChild(img);
+          } else {
+            const fallback = document.createElement('div');
+            fallback.style.cssText = 'font-size:54px';
+            fallback.textContent = '🎟';
+            imageWrap.appendChild(fallback);
+          }
+
+          const paidBadge = document.createElement('span');
+          paidBadge.style.cssText = 'position:absolute;top:12px;right:12px;background:#dcfce7;color:#166534;border:1px solid #86efac;font-size:11px;font-weight:800;border-radius:999px;padding:5px 10px';
+          paidBadge.textContent = translateOrderStatus(order.status);
+          imageWrap.appendChild(paidBadge);
+
+          const body = document.createElement('div');
+          body.style.cssText = 'padding:16px;display:flex;flex-direction:column;gap:10px;flex:1';
+
+          const title = document.createElement('h3');
+          title.style.cssText = 'margin:0;font-size:22px;line-height:1.1;letter-spacing:-.02em;color:#0f172a';
+          title.textContent = typeInfo.name || order.ticketTypeName || 'Ticket comprado';
+          body.appendChild(title);
+
+          const eventName = document.createElement('div');
+          eventName.style.cssText = 'font-size:14px;color:#475569;font-weight:700';
+          eventName.textContent = eventInfo.title || 'Evento vinculado a tu compra';
+          body.appendChild(eventName);
+
+          const meta = document.createElement('div');
+          meta.style.cssText = 'display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px';
+          meta.innerHTML =
+            '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc"><div style="font-size:11px;color:#64748b;font-weight:700">Cantidad</div><div style="font-size:18px;font-weight:800;color:#0f172a">' + Number(order.quantity || 1) + '</div></div>' +
+            '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:10px;background:#f8fafc"><div style="font-size:11px;color:#64748b;font-weight:700">Total pagado</div><div style="font-size:18px;font-weight:800;color:#0f172a">$' + Number(order.totalAmount || 0).toFixed(2) + '</div></div>';
+          body.appendChild(meta);
+
+          const details = document.createElement('div');
+          details.style.cssText = 'display:flex;flex-direction:column;gap:6px;font-size:13px;color:#475569';
+          details.innerHTML =
+            '<div><strong>Evento:</strong> ' + (eventInfo.title || 'Sin nombre disponible') + '</div>' +
+            '<div><strong>Fecha:</strong> ' + eventDate + '</div>' +
+            '<div><strong>Ubicacion:</strong> ' + (eventInfo.location || 'Por confirmar') + '</div>' +
+            '<div><strong>Correo receptor:</strong> ' + (order.recipientEmail || '-') + '</div>' +
+            '<div><strong>Orden:</strong> ' + (order.id || '-') + '</div>' +
+            '<div><strong>Compra:</strong> ' + (order.createdAt ? new Date(order.createdAt).toLocaleString() : '-') + '</div>';
+          body.appendChild(details);
+
+          card.appendChild(imageWrap);
+          card.appendChild(body);
+          grid.appendChild(card);
+        });
+      } catch (e) {
+        grid.innerHTML = '<div class="emptyTypeState">No fue posible cargar los tickets comprados.</div>';
+        setMsg('ticketMsg', e.message, 'err');
+      }
+    }
+
     async function loadSummary() {
       setMsg('summaryMsg', '', 'info');
       if (userRole !== 'admin') {
@@ -1733,7 +2394,8 @@ export class TicketController {
         });
       }
       if (sessionUser?.email) {
-        document.getElementById('buyEmail').value = sessionUser.email;
+        const buyEmailEl = document.getElementById('buyEmail');
+        if (buyEmailEl) buyEmailEl.value = sessionUser.email;
       }
       document.getElementById('typeImageFile').onchange = handleTypeImageChange;
       renderTypeImagePreview(currentTypeImageData);
@@ -1770,6 +2432,214 @@ export class TicketController {
 </html>`;
   }
 
+  // ─── MercadoPago endpoints ───────────────────────────────────────────────
+
+  @Post('mp/create-preference')
+  @UseGuards(RoleGuard)
+  @Roles('standard')
+  async mpCreatePreference(
+    @Body()
+    body: {
+      items: { typeId: string; qty: number; price: number; name: string }[];
+      userId: string;
+      recipientEmail?: string;
+    },
+  ) {
+    if (!this.mpService.isEnabled()) {
+      throw new BadRequestException(
+        'El pago con MercadoPago no está habilitado. Configura MP_ACCESS_TOKEN en el servidor.',
+      );
+    }
+    if (!body.items?.length) throw new BadRequestException('No hay items para pagar');
+    if (!body.userId?.trim()) throw new BadRequestException('userId requerido');
+
+    let pendingOrders: any[] = [];
+    try {
+      // Reservar stock: crear órdenes con status "pending_mp"
+      pendingOrders = await this.ticketService.createPendingMpOrders({
+        items: body.items,
+        userId: body.userId,
+        recipientEmail: body.recipientEmail,
+      });
+
+      // Construir items para MercadoPago (unit_price mínimo 1 para pasar validación MP)
+      const mpItems = pendingOrders.map((o) => ({
+        id: String(o.ticketTypeId ?? o.id),
+        title: String(o.ticketTypeName ?? 'Ticket').substring(0, 256),
+        quantity: Number(o.quantity) || 1,
+        unit_price: Math.max(1, Number(o.unitPrice) || 0),
+        currency_id: 'COP',
+      }));
+
+      // externalReference = IDs de órdenes separados por coma
+      const externalReference = pendingOrders.map((o) => o.id).join(',');
+
+      const preference = await this.mpService.createPreference(
+        mpItems,
+        externalReference,
+        body.recipientEmail,
+      );
+
+      // Guardar externalReference en cada orden para poder verificarla después
+      await this.ticketService.setOrdersRef(pendingOrders.map((o) => o.id), externalReference);
+
+      return {
+        preferenceId: preference.id,
+        init_point: preference.init_point,
+        sandbox_init_point: preference.sandbox_init_point,
+        orderIds: pendingOrders.map((o) => o.id),
+      };
+    } catch (err) {
+      // Si hay órdenes creadas pero MP falló, cancelarlas y devolver stock
+      if (pendingOrders.length > 0) {
+        await this.ticketService.cancelMpOrders(pendingOrders.map((o) => o.id)).catch(() => {});
+      }
+      const msg = err?.message ?? err?.cause?.message ?? String(err);
+      throw new BadRequestException('Error al crear preferencia de pago: ' + msg);
+    }
+  }
+
+  @Post('mp/webhook')
+  @HttpCode(200)
+  async mpWebhook(@Body() body: any, @Req() req: any) {
+    const type = body?.type ?? body?.topic;
+    if (type !== 'payment') return { ok: true };
+
+    const paymentId = String(body?.data?.id ?? body?.id ?? '').trim();
+    if (!paymentId) return { ok: true };
+
+    try {
+      const payment = await this.mpService.getPayment(paymentId);
+      if (!payment) return { ok: true };
+
+      const externalRef = String(payment.external_reference ?? '').trim();
+      const status = String(payment.status ?? '').toLowerCase();
+
+      if (!externalRef) return { ok: true };
+
+      const orderIds = externalRef.split(',').map((s) => s.trim()).filter(Boolean);
+      if (status === 'approved') {
+        await this.ticketService.confirmMpOrders(orderIds, paymentId);
+      } else if (status === 'rejected' || status === 'cancelled') {
+        await this.ticketService.cancelMpOrders(orderIds);
+      }
+    } catch (e) {
+      // No relanzar — MP requiere 200 siempre
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Verifica en la API de MP si alguna orden pending_mp del usuario ya fue pagada.
+   * Confirma automáticamente las que encuentra aprobadas.
+   */
+  @Get('mp/check-pending')
+  @UseGuards(RoleGuard)
+  @Roles('standard', 'admin')
+  async mpCheckPending(@Req() req: any) {
+    const userId = req.user?.sub ?? req.user?.id ?? '';
+    if (!userId) throw new BadRequestException('No autenticado');
+
+    const pendingOrders = await this.ticketService.getPendingMpOrdersByUser(userId);
+    if (!pendingOrders.length) return { confirmed: 0, pending: 0, message: 'No hay pagos pendientes' };
+
+    // Agrupar por externalRef (guardado en paymentIntentId)
+    const groups = new Map<string, string[]>();
+    for (const order of pendingOrders) {
+      const extRef = (order.paymentIntentId && order.paymentIntentId !== 'mp_pending')
+        ? order.paymentIntentId
+        : order.id; // fallback: la orden fue creada antes del fix
+      const existing = groups.get(extRef) ?? [];
+      groups.set(extRef, [...existing, order.id]);
+    }
+
+    let confirmed = 0;
+    for (const [extRef, orderIds] of groups.entries()) {
+      const result = await this.mpService.searchApprovedPaymentByRef(extRef);
+      if (result) {
+        await this.ticketService.confirmMpOrders(orderIds, result.paymentId);
+        confirmed += orderIds.length;
+      }
+    }
+
+    return {
+      confirmed,
+      pending: pendingOrders.length - confirmed,
+      message: confirmed > 0
+        ? `${confirmed} orden(es) confirmadas como pagadas`
+        : 'No se encontraron pagos aprobados en MercadoPago',
+    };
+  }
+
+  @Get('mp/success')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  async mpSuccess(@Query() q: any) {
+    const paymentId = String(q.payment_id ?? '').trim();
+    const status = String(q.status ?? '').trim();
+    const extRef = String(q.external_reference ?? '').trim();
+
+    // Confirmar pago si MP redirige con datos (flujo no-webhook)
+    if (paymentId && status === 'approved' && extRef) {
+      try {
+        const orderIds = extRef.split(',').map((s) => s.trim()).filter(Boolean);
+        await this.ticketService.confirmMpOrders(orderIds, paymentId);
+      } catch (_) {}
+    }
+
+    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta http-equiv="refresh" content="3;url=http://localhost:3009">
+<title>Pago exitoso</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f0fdf4}
+.card{background:#fff;border-radius:16px;padding:40px 48px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.09);max-width:420px}
+.icon{font-size:56px;margin-bottom:16px}.title{font-size:22px;font-weight:800;color:#166534;margin-bottom:8px}
+.sub{color:#64748b;font-size:14px;line-height:1.6}.btn{display:inline-block;margin-top:22px;padding:10px 28px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px}</style>
+</head><body><div class="card"><div class="icon">✅</div>
+<div class="title">¡Pago aprobado!</div>
+<div class="sub">Tu compra fue procesada correctamente.<br>Redirigiendo a la aplicación en 3 segundos…</div>
+<a class="btn" href="http://localhost:3009">Volver ahora</a></div></body></html>`;
+  }
+
+  @Get('mp/failure')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  async mpFailure(@Query() q: any) {
+    const extRef = String(q.external_reference ?? '').trim();
+    if (extRef) {
+      try {
+        const orderIds = extRef.split(',').map((s) => s.trim()).filter(Boolean);
+        await this.ticketService.cancelMpOrders(orderIds);
+      } catch (_) {}
+    }
+    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta http-equiv="refresh" content="4;url=http://localhost:3009">
+<title>Pago fallido</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fff1f2}
+.card{background:#fff;border-radius:16px;padding:40px 48px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.09);max-width:420px}
+.icon{font-size:56px;margin-bottom:16px}.title{font-size:22px;font-weight:800;color:#be123c;margin-bottom:8px}
+.sub{color:#64748b;font-size:14px;line-height:1.6}.btn{display:inline-block;margin-top:22px;padding:10px 28px;background:#e11d48;color:#fff;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px}</style>
+</head><body><div class="card"><div class="icon">❌</div>
+<div class="title">Pago rechazado</div>
+<div class="sub">No se pudo procesar el pago. Tu reserva fue liberada.<br>Redirigiendo en 4 segundos…</div>
+<a class="btn" href="http://localhost:3009">Intentar de nuevo</a></div></body></html>`;
+  }
+
+  @Get('mp/pending')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  mpPending() {
+    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta http-equiv="refresh" content="5;url=http://localhost:3009">
+<title>Pago pendiente</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fffbeb}
+.card{background:#fff;border-radius:16px;padding:40px 48px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.09);max-width:420px}
+.icon{font-size:56px;margin-bottom:16px}.title{font-size:22px;font-weight:800;color:#92400e;margin-bottom:8px}
+.sub{color:#64748b;font-size:14px;line-height:1.6}.btn{display:inline-block;margin-top:22px;padding:10px 28px;background:#d97706;color:#fff;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px}</style>
+</head><body><div class="card"><div class="icon">⏳</div>
+<div class="title">Pago pendiente</div>
+<div class="sub">Tu pago está siendo procesado. Te notificaremos cuando se confirme.<br>Redirigiendo en 5 segundos…</div>
+<a class="btn" href="http://localhost:3009">Volver a la app</a></div></body></html>`;
+  }
+
+  // ─── Fin MercadoPago ─────────────────────────────────────────────────────
+
   @Post('data')
   async create(@Body() ticket: { title: string; description: string; status: string }) {
     return await this.ticketService.create(ticket);
@@ -1791,9 +2661,18 @@ export class TicketController {
   }
 
   @Get('types/:id/audience')
-  async getTicketTypeAudience(@Param('id', new ParseUUIDPipe()) id: string, @Query('includeAdmin') includeAdmin?: string) {
+  @UseGuards(RoleGuard)
+  @Roles('admin')
+  async getTicketTypeAudience(
+    @Req() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query('includeAdmin') includeAdmin?: string,
+  ) {
     const withAdmin = ['true', '1', 'yes'].includes(String(includeAdmin ?? '').toLowerCase());
-    return await this.ticketService.getTicketTypeAudienceWithOptions(id, withAdmin);
+    return await this.ticketService.getTicketTypeAudienceWithOptions(id, withAdmin, {
+      id: req.user?.sub,
+      email: req.user?.email,
+    });
   }
 
   @Post('types')
@@ -1869,7 +2748,12 @@ export class TicketController {
     const role = req.user?.accountType || req.user?.role || 'guest';
     const requesterId = req.user?.sub;
     const filters = role === 'admin'
-      ? { userId, email }
+      ? {
+          userId,
+          email,
+          organizerId: req.user?.sub,
+          organizerEmail: req.user?.email,
+        }
       : { userId: requesterId };
     return await this.ticketService.getOrders(filters, Number(limit ?? 50));
   }
@@ -1877,8 +2761,11 @@ export class TicketController {
   @Get('orders/summary')
   @UseGuards(RoleGuard)
   @Roles('admin')
-  async ordersSummary() {
-    return await this.ticketService.getOrdersSummary();
+  async ordersSummary(@Req() req: any) {
+    return await this.ticketService.getOrdersSummary({
+      id: req.user?.sub,
+      email: req.user?.email,
+    });
   }
 
   @Post('purchase/data')

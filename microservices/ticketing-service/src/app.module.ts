@@ -9,6 +9,7 @@ import { PaymentService } from './payment.service';
 import { RabbitMqService } from './rabbitmq.service';
 import { TicketController } from './ticket.controller';
 import { TicketService } from './ticket.service';
+import { MercadoPagoService } from './mercadopago.service';
 import { RoleGuard } from './guards/role.guard';
 
 const databaseUrl = String(process.env.DATABASE_URL ?? '').trim();
@@ -53,6 +54,7 @@ const shouldSynchronize = String(
     TicketService,
     PaymentService,
     RabbitMqService,
+    MercadoPagoService,
     {
       provide: APP_GUARD,
       useClass: RoleGuard,

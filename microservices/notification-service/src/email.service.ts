@@ -99,6 +99,40 @@ export class EmailService {
     });
   }
 
+  async sendPasswordChangeConfirmEmail(params: {
+    to: string;
+    name: string;
+    changeUrl: string;
+  }): Promise<{ sent: boolean; reason?: string }> {
+    return await this.sendEmail({
+      to: params.to,
+      subject: 'Confirma el cambio de contrasena - EventHive',
+      html: `
+        <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;max-width:560px;margin:0 auto">
+          <h2 style="margin-bottom:12px">Confirma el cambio de contrasena</h2>
+          <p>Hola ${this.escapeHtml(params.name)},</p>
+          <p>Has solicitado cambiar la contrasena de tu cuenta en EventHive. Para confirmar el cambio, haz clic en el siguiente boton:</p>
+          <p style="margin:24px 0">
+            <a href="${params.changeUrl}" style="display:inline-block;background:#e85d04;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:700">Confirmar cambio de contrasena</a>
+          </p>
+          <p>Si no solicitaste este cambio, ignora este correo. Tu contrasena actual seguira siendo la misma.</p>
+          <p>Si el boton no funciona, copia y pega este enlace en tu navegador:</p>
+          <p style="word-break:break-all;color:#e85d04">${params.changeUrl}</p>
+          <p>Este enlace expira en 30 minutos.</p>
+        </div>
+      `,
+      text: [
+        'Confirma el cambio de contrasena en EventHive',
+        `Hola ${params.name},`,
+        'Abre este enlace para confirmar el cambio:',
+        params.changeUrl,
+        'Este enlace expira en 30 minutos.',
+      ].join('\n'),
+      missingSmtpLog: `SMTP no configurado. Enlace de confirmacion de cambio de contrasena para ${params.to}: ${params.changeUrl}`,
+      errorLog: `Fallo al enviar correo de confirmacion de cambio de contrasena a ${params.to}`,
+    });
+  }
+
   async sendPurchaseConfirmation(params: {
     to: string;
     orderId: string;

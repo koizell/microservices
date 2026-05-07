@@ -1,4 +1,6 @@
-import { Controller, Get, Header, Param } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Header, Param, Req, UseGuards } from '@nestjs/common';
+import { Roles } from './decorators/roles.decorator';
+import { RoleGuard } from './guards/role.guard';
 
 function normalizeServiceBaseUrl(value: string | undefined, fallback: string) {
   const candidate = String(value ?? fallback)
@@ -33,7 +35,16 @@ export class MobileController {
   }
 
   @Get('dashboard/:userId')
-  async getDashboard(@Param('userId') userId: string) {
+  @UseGuards(RoleGuard)
+  @Roles('standard', 'admin')
+  async getDashboard(@Req() req: any, @Param('userId') userId: string) {
+    const role = String(req.user?.accountType || req.user?.role || 'guest').toLowerCase();
+    if (role !== 'admin') {
+      const requesterId = String(req.user?.sub || req.user?.id || '').trim();
+      if (!requesterId || requesterId !== String(userId || '').trim()) {
+        throw new ForbiddenException('No puedes consultar el dashboard de otro usuario');
+      }
+    }
     const [events, tickets, notifications, agenda] = await Promise.all([
       this.safeFetch(this.urlFor('event', '/events/summary'), { total: 0 }),
       this.safeFetch(this.urlFor('ticketing', '/tickets/summary'), { total: 0 }),

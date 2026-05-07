@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Header, Headers, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Header, Headers, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AgendaService } from './agenda.service';
+import { Roles } from './decorators/roles.decorator';
+import { RoleGuard } from './guards/role.guard';
 
 @Controller('agenda')
 export class AgendaController {
@@ -53,17 +55,41 @@ export class AgendaController {
   }
 
   @Post('favorites/data')
-  async addFavorite(@Body() body: { userId: string; sessionId: string }) {
-    return await this.agendaService.addFavorite(body);
+  @UseGuards(RoleGuard)
+  @Roles('standard', 'admin')
+  async addFavorite(@Req() req: any, @Body() body: { userId?: string; sessionId: string }) {
+    const role = String(req.user?.accountType || req.user?.role || 'guest').toLowerCase();
+    const requesterId = String(req.user?.sub || req.user?.id || '').trim();
+    const requestedId = String(body?.userId || '').trim();
+    const targetUserId = role === 'admin' && requestedId ? requestedId : requesterId;
+    if (!targetUserId) {
+      throw new ForbiddenException('No se pudo identificar al usuario');
+    }
+    return await this.agendaService.addFavorite({ userId: targetUserId, sessionId: body.sessionId });
   }
 
   @Get('favorites/data/:userId')
-  async listFavoritesByUser(@Param('userId') userId: string, @Query('limit') limit?: string) {
+  @UseGuards(RoleGuard)
+  @Roles('standard', 'admin')
+  async listFavoritesByUser(@Req() req: any, @Param('userId') userId: string, @Query('limit') limit?: string) {
+    this.assertCanAccessUser(req, userId);
     return await this.agendaService.listFavoritesByUser(userId, Number(limit ?? 50));
   }
 
   @Get('summary/:userId')
-  async summary(@Param('userId') userId: string) {
+  @UseGuards(RoleGuard)
+  @Roles('standard', 'admin')
+  async summary(@Req() req: any, @Param('userId') userId: string) {
+    this.assertCanAccessUser(req, userId);
     return await this.agendaService.getSummary(userId);
+  }
+
+  private assertCanAccessUser(req: any, userId: string) {
+    const role = String(req.user?.accountType || req.user?.role || 'guest').toLowerCase();
+    if (role === 'admin') return;
+    const requesterId = String(req.user?.sub || req.user?.id || '').trim();
+    if (!requesterId || requesterId !== String(userId || '').trim()) {
+      throw new ForbiddenException('No puedes consultar datos de otro usuario');
+    }
   }
 }

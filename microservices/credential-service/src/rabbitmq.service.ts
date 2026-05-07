@@ -11,6 +11,19 @@ function getRabbitMqUrl() {
   return nodeEnv === 'production' ? '' : 'amqp://localhost:5672';
 }
 
+function isRabbitMqRequired() {
+  const configured = String(process.env.RABBITMQ_REQUIRED ?? '').trim().toLowerCase();
+  if (configured === 'true') {
+    return true;
+  }
+  if (configured === 'false') {
+    return false;
+  }
+
+  const nodeEnv = String(process.env.NODE_ENV ?? '').trim().toLowerCase();
+  return nodeEnv === 'production';
+}
+
 @Injectable()
 export class RabbitMqService implements OnModuleDestroy {
   private readonly logger = new Logger(RabbitMqService.name);
@@ -82,6 +95,7 @@ export class RabbitMqService implements OnModuleDestroy {
   getStatus() {
     return {
       url: getRabbitMqUrl() || 'disabled',
+      required: isRabbitMqRequired(),
       connected: Boolean(this.channel),
       lastConnectedAt: this.lastConnectedAt,
       lastError: this.lastError,

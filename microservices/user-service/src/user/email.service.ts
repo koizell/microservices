@@ -60,6 +60,14 @@ export class EmailService {
     return await this.postNotification('/notifications/email/password-reset', params);
   }
 
+  async sendPasswordChangeConfirmEmail(params: {
+    to: string;
+    name: string;
+    changeUrl: string;
+  }): Promise<{ sent: boolean; reason?: string }> {
+    return await this.postNotification('/notifications/email/password-change-confirm', params);
+  }
+
   private getNotificationServiceBaseUrls() {
     return buildServiceBaseUrlCandidates(process.env.NOTIFICATION_SERVICE_URL, 'http://localhost:3003');
   }

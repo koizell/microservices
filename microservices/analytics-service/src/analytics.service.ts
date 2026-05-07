@@ -46,40 +46,52 @@ export class AnalyticsService {
     }
   }
 
-  async listDailySales(options?: { limit?: number; ticketTypeId?: string }) {
+  async listDailySales(options?: { limit?: number; ticketTypeId?: string; organizerId?: string; organizerEmail?: string }) {
     const safeLimit = this.normalizeLimit(options?.limit);
     const ticketTypeId = String(options?.ticketTypeId ?? '').trim();
     try {
-      return await this.listDailySalesFromOrders(safeLimit, ticketTypeId || undefined);
+      return await this.listDailySalesFromOrders(safeLimit, ticketTypeId || undefined, {
+        organizerId: options?.organizerId,
+        organizerEmail: options?.organizerEmail,
+      });
     } catch (error) {
       this.logger.error('No se pudo listar ventas diarias', error instanceof Error ? error.stack : undefined);
       throw new InternalServerErrorException('No se pudo listar ventas');
     }
   }
 
-  async listSalesHistory(options?: { limit?: number; ticketTypeId?: string }) {
+  async listSalesHistory(options?: { limit?: number; ticketTypeId?: string; organizerId?: string; organizerEmail?: string }) {
     const safeLimit = this.normalizeLimit(options?.limit);
     const ticketTypeId = String(options?.ticketTypeId ?? '').trim();
     try {
-      return await this.listRecentSalesFromOrders(safeLimit, ticketTypeId || undefined);
+      return await this.listRecentSalesFromOrders(safeLimit, ticketTypeId || undefined, {
+        organizerId: options?.organizerId,
+        organizerEmail: options?.organizerEmail,
+      });
     } catch (error) {
       this.logger.error('No se pudo listar el historial de ventas', error instanceof Error ? error.stack : undefined);
       throw new InternalServerErrorException('No se pudo listar el historial de ventas');
     }
   }
 
-  async getSummary() {
+  async getSummary(organizer?: { id?: string; email?: string }) {
     try {
+      const params: Array<string | number> = [];
+      const filters = [`LOWER(COALESCE(o.status, 'paid')) IN (${PAID_ORDER_STATUSES_SQL})`];
+      this.appendOrganizerFilter(filters, params, organizer);
+      const orgWhere = filters.join(' AND ');
+
       const daysTrackedRows = await this.dataSource.query(
         `
           SELECT COUNT(*)::int AS "daysTracked"
           FROM (
             SELECT o.created_at::date AS day
             FROM orders o
-            WHERE LOWER(COALESCE(o.status, 'paid')) IN (${PAID_ORDER_STATUSES_SQL})
+            WHERE ${orgWhere}
             GROUP BY o.created_at::date
           ) tracked_days
         `,
+        params,
       );
 
       const todayRows = await this.dataSource.query(
@@ -88,9 +100,10 @@ export class AnalyticsService {
             COALESCE(SUM(o.total_amount), 0)::numeric AS "todayRevenue",
             COALESCE(SUM(o.quantity), 0)::int AS "todayTickets"
           FROM orders o
-          WHERE LOWER(COALESCE(o.status, 'paid')) IN (${PAID_ORDER_STATUSES_SQL})
+          WHERE ${orgWhere}
             AND o.created_at::date = CURRENT_DATE
         `,
+        params,
       );
 
       const daysTracked = Number(daysTrackedRows[0]?.daysTracked ?? 0);
@@ -106,6 +119,32 @@ export class AnalyticsService {
       this.logger.error('No se pudo obtener el resumen', error instanceof Error ? error.stack : undefined);
       throw new InternalServerErrorException('No se pudo obtener el resumen');
     }
+  }
+
+  private appendOrganizerFilter(
+    filters: string[],
+    params: Array<string | number>,
+    organizer?: { id?: string; email?: string },
+  ) {
+    const organizerId = String(organizer?.id ?? '').trim();
+    const organizerEmail = String(organizer?.email ?? '').trim().toLowerCase();
+    if (!organizerId && !organizerEmail) {
+      return;
+    }
+    const subFilters: string[] = [];
+    if (organizerId) {
+      params.push(organizerId);
+      subFilters.push(`tt.organizer_id = $${params.length}`);
+    }
+    if (organizerEmail) {
+      params.push(organizerEmail);
+      subFilters.push(`LOWER(tt.organizer_email) = $${params.length}`);
+    }
+    filters.push(
+      `o.ticket_type_id IN (
+        SELECT tt.id::text FROM ticket_types tt WHERE ${subFilters.join(' OR ')}
+      )`,
+    );
   }
 
   private getTodayIsoDate() {
@@ -136,7 +175,11 @@ export class AnalyticsService {
     return Math.max(1, Math.min(Math.floor(limit), 90));
   }
 
-  private async listDailySalesFromOrders(limit: number, ticketTypeId?: string) {
+  private async listDailySalesFromOrders(
+    limit: number,
+    ticketTypeId?: string,
+    organizer?: { organizerId?: string; organizerEmail?: string },
+  ) {
     const filters = [`LOWER(COALESCE(o.status, 'paid')) IN (${PAID_ORDER_STATUSES_SQL})`];
     const params: Array<string | number> = [];
 
@@ -144,6 +187,11 @@ export class AnalyticsService {
       params.push(ticketTypeId);
       filters.push(`o.ticket_type_id = $${params.length}`);
     }
+
+    this.appendOrganizerFilter(filters, params, {
+      id: organizer?.organizerId,
+      email: organizer?.organizerEmail,
+    });
 
     params.push(limit);
     const limitPlaceholder = `$${params.length}`;
@@ -170,7 +218,11 @@ export class AnalyticsService {
     }));
   }
 
-  private async listRecentSalesFromOrders(limit: number, ticketTypeId?: string) {
+  private async listRecentSalesFromOrders(
+    limit: number,
+    ticketTypeId?: string,
+    organizer?: { organizerId?: string; organizerEmail?: string },
+  ) {
     const filters = [`LOWER(COALESCE(o.status, 'paid')) IN (${PAID_ORDER_STATUSES_SQL})`];
     const params: Array<string | number> = [];
 
@@ -178,6 +230,11 @@ export class AnalyticsService {
       params.push(ticketTypeId);
       filters.push(`o.ticket_type_id = $${params.length}`);
     }
+
+    this.appendOrganizerFilter(filters, params, {
+      id: organizer?.organizerId,
+      email: organizer?.organizerEmail,
+    });
 
     params.push(limit);
     const limitPlaceholder = `$${params.length}`;

@@ -12,6 +12,13 @@ type PurchaseCredentialInput = {
   attendeeName: string;
 };
 
+type OwnedPaidOrder = {
+  orderId: string;
+  orderItemId: string;
+  ticketTypeId: string;
+  attendeeName: string;
+};
+
 function normalizeServiceBaseUrl(value: string | undefined, fallback: string) {
   const candidate = String(value ?? fallback)
     .trim()
@@ -162,6 +169,17 @@ export class CredentialService implements OnModuleInit {
       credential: await this.credentialRepository.save(credential),
       created: true,
     };
+  }
+
+  private async publishQrGeneratedEvent(credential: Credential) {
+    await this.rabbitMqService.publish('qr.generated', {
+      credentialId: credential.id,
+      orderItemId: credential.orderItemId,
+      ticketTypeId: credential.ticketTypeId,
+      attendeeName: credential.attendeeName,
+      qrCodeHash: credential.qrCodeHash,
+      createdAt: credential.createdAt,
+    });
   }
 
   private getCredentialStatus(credential: Credential): 'VALID' | 'USED' | 'REVOKED' {
@@ -356,7 +374,7 @@ export class CredentialService implements OnModuleInit {
     return response;
   }
 
-  private async getOwnedOrderItemIds(authorization: string) {
+  private async getOwnedPaidOrders(authorization: string): Promise<OwnedPaidOrder[]> {
     const normalizedAuthorization = String(authorization ?? '').trim();
     if (!normalizedAuthorization.startsWith('Bearer ')) {
       throw new BadRequestException('Token requerido para consultar credenciales del usuario');
@@ -403,8 +421,19 @@ export class CredentialService implements OnModuleInit {
     }
 
     return payload
-      .map((order) => (typeof order === 'object' && order ? String((order as { ticketId?: unknown }).ticketId ?? '').trim() : ''))
-      .filter(Boolean);
+      .filter((order) => typeof order === 'object' && order)
+      .map((order) => {
+        const current = order as Record<string, unknown>;
+        return {
+          orderId: String(current.id ?? '').trim(),
+          orderItemId: String(current.ticketId ?? '').trim(),
+          ticketTypeId: String(current.ticketTypeId ?? '').trim(),
+          attendeeName: String(current.recipientEmail ?? current.userId ?? current.id ?? '').trim(),
+          status: String(current.status ?? '').trim().toLowerCase(),
+        };
+      })
+      .filter((order) => Boolean(order.orderItemId) && Boolean(order.ticketTypeId) && ['paid', 'approved', 'succeeded'].includes(order.status))
+      .map(({ status, ...order }) => order);
   }
 
   async ingestPurchaseEvent(payload: Partial<PurchaseCredentialInput>) {
@@ -412,14 +441,7 @@ export class CredentialService implements OnModuleInit {
     const { credential, created } = await this.createOrReuseCredential(normalized);
 
     if (created) {
-      await this.rabbitMqService.publish('qr.generated', {
-        credentialId: credential.id,
-        orderItemId: credential.orderItemId,
-        ticketTypeId: credential.ticketTypeId,
-        attendeeName: credential.attendeeName,
-        qrCodeHash: credential.qrCodeHash,
-        createdAt: credential.createdAt,
-      });
+      await this.publishQrGeneratedEvent(credential);
     }
 
     return {
@@ -443,10 +465,23 @@ export class CredentialService implements OnModuleInit {
   }
 
   async getCredentialsForAuthorization(authorization: string) {
-    const orderItemIds = await this.getOwnedOrderItemIds(authorization);
-    if (orderItemIds.length === 0) {
+    const ownedOrders = await this.getOwnedPaidOrders(authorization);
+    if (ownedOrders.length === 0) {
       return [];
     }
+
+    for (const order of ownedOrders) {
+      const { credential, created } = await this.createOrReuseCredential({
+        orderItemId: order.orderItemId,
+        ticketTypeId: order.ticketTypeId,
+        attendeeName: order.attendeeName || order.orderId,
+      });
+      if (created) {
+        await this.publishQrGeneratedEvent(credential);
+      }
+    }
+
+    const orderItemIds = ownedOrders.map((order) => order.orderItemId);
 
     const credentials = await this.credentialRepository.find({
       where: { orderItemId: In(orderItemIds) },
@@ -470,10 +505,11 @@ export class CredentialService implements OnModuleInit {
     const rabbitmq = this.rabbitMqService.getStatus();
     const allowedScanners = this.getAllowedScanners();
     const validCount = Math.max(totalCredentials - usedCount - revokedRows, 0);
+    const rabbitmqOperational = rabbitmq.connected || !rabbitmq.required;
 
     return {
       service: 'credential-service',
-      status: rabbitmq.connected ? 'ok' : 'degraded',
+      status: rabbitmqOperational ? 'ok' : 'degraded',
       totalCredentials,
       validCount,
       usedCount,

@@ -127,6 +127,56 @@ export class TicketService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureTicketingSchema();
+    await this.cleanupStalePendingMpOrders();
+    await this.reconcileTicketTypeSalesCounters();
+  }
+
+  private async reconcileTicketTypeSalesCounters(ticketTypeIds?: string[]): Promise<boolean> {
+    const normalizedIds = Array.from(new Set((ticketTypeIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
+
+    const ticketTypes = normalizedIds.length
+      ? await this.ticketTypeRepository
+          .createQueryBuilder('tt')
+          .where('tt.id IN (:...ids)', { ids: normalizedIds })
+          .getMany()
+      : await this.ticketTypeRepository.find();
+
+    if (!ticketTypes.length) {
+      return false;
+    }
+
+    const ordersQuery = this.orderRepository
+      .createQueryBuilder('o')
+      .select('o.ticketTypeId', 'ticketTypeId')
+      .addSelect('COALESCE(SUM(o.quantity), 0)', 'qty')
+      .where('o.ticketTypeId IS NOT NULL')
+      .andWhere("LOWER(COALESCE(o.status, 'paid')) IN ('pending_mp','paid','succeeded','approved')")
+      .groupBy('o.ticketTypeId');
+
+    if (normalizedIds.length) {
+      ordersQuery.andWhere('o.ticketTypeId IN (:...ids)', { ids: normalizedIds });
+    }
+
+    const rows = await ordersQuery.getRawMany<{ ticketTypeId: string; qty: string }>();
+    const soldByTicketTypeId = new Map(
+      rows.map((row) => [String(row.ticketTypeId || '').trim(), Number(row.qty || 0)]),
+    );
+
+    let changed = false;
+    for (const ticketType of ticketTypes) {
+      const nextQuantitySold = soldByTicketTypeId.get(ticketType.id) ?? 0;
+      if (Number(ticketType.quantitySold || 0) === nextQuantitySold) {
+        continue;
+      }
+      await this.ticketTypeRepository.update({ id: ticketType.id }, { quantitySold: nextQuantitySold });
+      changed = true;
+    }
+
+    if (changed) {
+      this.logger.log(`[TicketType] Reconciliado quantity_sold para ${ticketTypes.length} tipo(s)`);
+    }
+
+    return changed;
   }
 
   private async ensureTicketingSchema() {
@@ -425,6 +475,50 @@ export class TicketService implements OnModuleInit {
     }
   }
 
+  private async publishPurchaseEffectsForOrder(order: Order, paymentStatus: string) {
+    const ticketType = order.ticketTypeId
+      ? await this.ticketTypeRepository.findOneBy({ id: order.ticketTypeId })
+      : null;
+
+    const event = {
+      eventType: 'ticket.purchased',
+      occurredAt: new Date().toISOString(),
+      orderId: order.id,
+      orderItemId: order.ticketId,
+      userId: order.userId,
+      ticketTypeId: order.ticketTypeId,
+      ticketTypeName: order.ticketTypeName || ticketType?.name || order.ticketTypeId,
+      organizerId: ticketType?.organizerId ?? null,
+      organizerName: ticketType?.organizerName ?? null,
+      organizerEmail: ticketType?.organizerEmail ?? null,
+      attendeeName: order.recipientEmail || order.userId,
+      amount: Number(order.totalAmount || 0),
+      unitPrice: Number(order.unitPrice || 0),
+      quantity: Number(order.quantity || 1),
+      recipientEmail: order.recipientEmail,
+      paymentIntentId: order.paymentIntentId,
+      paymentStatus,
+    };
+
+    const queuePublished = await this.rabbitMqService.publish('ticket.purchased', event);
+    const credentialSync = this.shouldUseCredentialHttpSync(queuePublished)
+      ? await this.syncCredentialDirectly(event)
+      : { attempted: false, ok: true, mode: 'queue' };
+    const notificationSync = this.shouldUseNotificationHttpSync(queuePublished)
+      ? await this.syncNotificationDirectly(event)
+      : { attempted: false, ok: true, mode: 'queue' };
+
+    if (!queuePublished) {
+      this.logger.warn(`[ticket.purchased] No se pudo publicar en cola para la orden ${order.id}`);
+    }
+    if (credentialSync.attempted && !credentialSync.ok) {
+      this.logger.warn(`[ticket.purchased] Credential sync fallo para la orden ${order.id}: ${(credentialSync as { reason?: unknown }).reason ?? 'sin detalle'}`);
+    }
+    if (notificationSync.attempted && !notificationSync.ok) {
+      this.logger.warn(`[ticket.purchased] Notification sync fallo para la orden ${order.id}: ${(notificationSync as { reason?: unknown }).reason ?? 'sin detalle'}`);
+    }
+  }
+
   async create(ticket: Partial<Ticket>): Promise<Ticket> {
     const newTicket = this.ticketRepository.create(ticket);
     return await this.ticketRepository.save(newTicket);
@@ -455,114 +549,32 @@ export class TicketService implements OnModuleInit {
     includeInactive = false,
     organizer?: { id?: string; email?: string },
   ): Promise<TicketType[]> {
-    const query = this.ticketTypeRepository.createQueryBuilder('tt');
-    if (eventId) {
-      query.where('tt.eventId = :eventId', { eventId });
-    }
-    if (organizer?.id) {
-      query.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
-    }
-    if (organizer?.email) {
-      query.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
-        organizerEmail: organizer.email.toLowerCase(),
-      });
-    }
-    if (!includeInactive) {
-      query.andWhere('tt.isActive = :isActive', { isActive: true });
-    }
-    let ticketTypes = await query.orderBy('tt.createdAt', 'DESC').getMany();
-    const changed = await this.syncTicketTypeArchiveState(ticketTypes);
-    if (!changed) {
-      if (organizer && !ticketTypes.length) {
-        const backfilled = await this.backfillOrganizerForUnassignedTypes(organizer);
-        if (backfilled) {
-          const refreshedQuery = this.ticketTypeRepository.createQueryBuilder('tt');
-          if (eventId) {
-            refreshedQuery.where('tt.eventId = :eventId', { eventId });
-          }
-          if (organizer?.id) {
-            refreshedQuery.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
-          }
-          if (organizer?.email) {
-            refreshedQuery.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
-              organizerEmail: organizer.email.toLowerCase(),
-            });
-          }
-          if (!includeInactive) {
-            refreshedQuery.andWhere('tt.isActive = :isActive', { isActive: true });
-          }
-          return await refreshedQuery.orderBy('tt.createdAt', 'DESC').getMany();
-        }
+    const buildQuery = () => {
+      const query = this.ticketTypeRepository.createQueryBuilder('tt');
+      if (eventId) {
+        query.where('tt.eventId = :eventId', { eventId });
       }
-
-      return ticketTypes;
-    }
-
-    const refreshedQuery = this.ticketTypeRepository.createQueryBuilder('tt');
-    if (eventId) {
-      refreshedQuery.where('tt.eventId = :eventId', { eventId });
-    }
-    if (organizer?.id) {
-      refreshedQuery.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
-    }
-    if (organizer?.email) {
-      refreshedQuery.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
-        organizerEmail: organizer.email.toLowerCase(),
-      });
-    }
-    if (!includeInactive) {
-      refreshedQuery.andWhere('tt.isActive = :isActive', { isActive: true });
-    }
-    ticketTypes = await refreshedQuery.orderBy('tt.createdAt', 'DESC').getMany();
-
-    if (organizer && !ticketTypes.length) {
-      const backfilled = await this.backfillOrganizerForUnassignedTypes(organizer);
-      if (backfilled) {
-        const retryQuery = this.ticketTypeRepository.createQueryBuilder('tt');
-        if (eventId) {
-          retryQuery.where('tt.eventId = :eventId', { eventId });
-        }
-        if (organizer?.id) {
-          retryQuery.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
-        }
-        if (organizer?.email) {
-          retryQuery.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
-            organizerEmail: organizer.email.toLowerCase(),
-          });
-        }
-        if (!includeInactive) {
-          retryQuery.andWhere('tt.isActive = :isActive', { isActive: true });
-        }
-        return await retryQuery.orderBy('tt.createdAt', 'DESC').getMany();
+      if (organizer?.id) {
+        query.andWhere('tt.organizerId = :organizerId', { organizerId: organizer.id });
       }
-    }
+      if (organizer?.email) {
+        query.andWhere('LOWER(tt.organizerEmail) = :organizerEmail', {
+          organizerEmail: organizer.email.toLowerCase(),
+        });
+      }
+      if (!includeInactive) {
+        query.andWhere('tt.isActive = :isActive', { isActive: true });
+      }
+      return query.orderBy('tt.createdAt', 'DESC');
+    };
 
+    let ticketTypes = await buildQuery().getMany();
+    const countersChanged = await this.reconcileTicketTypeSalesCounters(ticketTypes.map((ticketType) => ticketType.id));
+    const archiveChanged = await this.syncTicketTypeArchiveState(ticketTypes);
+    if (countersChanged || archiveChanged) {
+      ticketTypes = await buildQuery().getMany();
+    }
     return ticketTypes;
-  }
-
-  private async backfillOrganizerForUnassignedTypes(organizer: { id?: string; email?: string }) {
-    const organizerId = String(organizer?.id || '').trim();
-    const organizerEmail = String(organizer?.email || '').trim().toLowerCase();
-    if (!organizerId && !organizerEmail) {
-      return 0;
-    }
-
-    const updatePayload: Partial<TicketType> = {};
-    if (organizerId) {
-      updatePayload.organizerId = organizerId;
-    }
-    if (organizerEmail) {
-      updatePayload.organizerEmail = organizerEmail;
-    }
-
-    const result = await this.ticketTypeRepository
-      .createQueryBuilder()
-      .update(TicketType)
-      .set(updatePayload)
-      .where('organizer_id IS NULL AND organizer_email IS NULL')
-      .execute();
-
-    return Number(result.affected || 0);
   }
 
   async createTicketType(data: {
@@ -748,17 +760,32 @@ export class TicketService implements OnModuleInit {
     filters?: {
       userId?: string;
       email?: string;
+      organizerId?: string;
+      organizerEmail?: string;
     },
     limit = 50,
   ): Promise<Order[]> {
     const query = this.orderRepository.createQueryBuilder('o');
     const userId = String(filters?.userId || '').trim();
     const email = String(filters?.email || '').trim().toLowerCase();
+    const organizerId = String(filters?.organizerId || '').trim();
+    const organizerEmail = String(filters?.organizerEmail || '').trim().toLowerCase();
     if (userId) {
       query.where('o.userId = :userId', { userId });
     }
     if (email) {
       query.andWhere('LOWER(o.recipientEmail) = :email', { email });
+    }
+    if (organizerId || organizerEmail) {
+      query.andWhere(
+        `o.ticketTypeId IN (
+          SELECT tt.id::text
+          FROM ticket_types tt
+          WHERE ${organizerId ? 'tt.organizer_id = :organizerId' : 'FALSE'}
+             OR ${organizerEmail ? 'LOWER(tt.organizer_email) = :organizerEmail' : 'FALSE'}
+        )`,
+        { organizerId, organizerEmail },
+      );
     }
     return await query
       .orderBy('o.createdAt', 'DESC')
@@ -800,7 +827,7 @@ export class TicketService implements OnModuleInit {
     return await this.getTicketTypeAudienceWithOptions(ticketTypeId, includeAdmin);
   }
 
-  async getTicketTypeAudienceWithOptions(ticketTypeId: string, includeAdmin: boolean): Promise<{
+  async getTicketTypeAudienceWithOptions(ticketTypeId: string, includeAdmin: boolean, organizer?: { id?: string; email?: string }): Promise<{
     ticketType: {
       id: string;
       name: string;
@@ -838,6 +865,18 @@ export class TicketService implements OnModuleInit {
     const ticketType = await this.ticketTypeRepository.findOneBy({ id: normalizedId });
     if (!ticketType) {
       throw new NotFoundException('Ticket type not found');
+    }
+
+    const requesterId = String(organizer?.id || '').trim();
+    const requesterEmail = String(organizer?.email || '').trim().toLowerCase();
+    if (requesterId || requesterEmail) {
+      const ownerId = String(ticketType.organizerId || '').trim();
+      const ownerEmail = String(ticketType.organizerEmail || '').trim().toLowerCase();
+      const matchesId = requesterId && ownerId && requesterId === ownerId;
+      const matchesEmail = requesterEmail && ownerEmail && requesterEmail === ownerEmail;
+      if (!matchesId && !matchesEmail) {
+        throw new NotFoundException('Ticket type not found');
+      }
     }
 
     const allowedRolesSql = includeAdmin
@@ -910,27 +949,47 @@ export class TicketService implements OnModuleInit {
     };
   }
 
-  async getOrdersSummary(): Promise<{
+  async getOrdersSummary(organizer?: { id?: string; email?: string }): Promise<{
     totalOrders: number;
     totalRevenue: number;
     totalTicketsSold: number;
     paidCount: number;
     pendingCount: number;
   }> {
-    const totalOrders = await this.orderRepository.count();
-    const result = await this.orderRepository
-      .createQueryBuilder('o')
-      .select('SUM(o.totalAmount)', 'totalRevenue')
-      .addSelect('SUM(o.quantity)', 'totalTicketsSold')
-      .addSelect(
-        "COUNT(CASE WHEN LOWER(o.status) IN ('paid','succeeded','approved') THEN 1 END)",
-        'paidCount',
-      )
-      .addSelect(
-        "COUNT(CASE WHEN LOWER(o.status) IN ('pending','processing','requires_action') THEN 1 END)",
-        'pendingCount',
-      )
-      .getRawOne();
+    const organizerId = String(organizer?.id || '').trim();
+    const organizerEmail = String(organizer?.email || '').trim().toLowerCase();
+    const applyOrganizerFilter = <T extends import('typeorm').SelectQueryBuilder<any>>(qb: T): T => {
+      if (organizerId || organizerEmail) {
+        qb.andWhere(
+          `o.ticketTypeId IN (
+            SELECT tt.id::text
+            FROM ticket_types tt
+            WHERE ${organizerId ? 'tt.organizer_id = :organizerId' : 'FALSE'}
+               OR ${organizerEmail ? 'LOWER(tt.organizer_email) = :organizerEmail' : 'FALSE'}
+          )`,
+          { organizerId, organizerEmail },
+        );
+      }
+      return qb;
+    };
+
+    const countQb = applyOrganizerFilter(this.orderRepository.createQueryBuilder('o'));
+    const totalOrders = await countQb.getCount();
+    const aggregatedQb = applyOrganizerFilter(
+      this.orderRepository
+        .createQueryBuilder('o')
+        .select('SUM(o.totalAmount)', 'totalRevenue')
+        .addSelect('SUM(o.quantity)', 'totalTicketsSold')
+        .addSelect(
+          "COUNT(CASE WHEN LOWER(o.status) IN ('paid','succeeded','approved') THEN 1 END)",
+          'paidCount',
+        )
+        .addSelect(
+          "COUNT(CASE WHEN LOWER(o.status) IN ('pending','processing','requires_action') THEN 1 END)",
+          'pendingCount',
+        ),
+    );
+    const result = await aggregatedQb.getRawOne();
 
     return {
       totalOrders,
@@ -1163,5 +1222,111 @@ export class TicketService implements OnModuleInit {
       credentialSync,
       notificationSync,
     };
+  }
+
+  // ── MercadoPago helpers ──────────────────────────────────────────────────
+
+  async createPendingMpOrders(input: {
+    items: { typeId: string; qty: number; price: number; name: string }[];
+    userId: string;
+    recipientEmail?: string;
+  }): Promise<Order[]> {
+    const orders: Order[] = [];
+    for (const item of input.items) {
+      const qty = Math.max(1, Number(item.qty || 1));
+      const ticketType = await this.ticketTypeRepository.findOneBy({ id: item.typeId });
+      if (!ticketType) throw new BadRequestException(`Ticket type ${item.typeId} no encontrado`);
+      if (!ticketType.isActive) throw new BadRequestException(`Ticket tipo "${ticketType.name}" no está disponible`);
+      const available = ticketType.quantity - ticketType.quantitySold;
+      if (available < qty) throw new BadRequestException(`Stock insuficiente para "${ticketType.name}"`);
+
+      // Reservar stock
+      ticketType.quantitySold += qty;
+      await this.ticketTypeRepository.save(ticketType);
+
+      const unitPrice = Number(ticketType.price);
+      const ticket = await this.create({ title: ticketType.name + ' x' + qty, description: 'Pago MP pendiente', status: 'pending' });
+      const order = this.orderRepository.create({
+        userId: input.userId,
+        ticketId: ticket.id,
+        ticketTypeId: ticketType.id,
+        ticketTypeName: ticketType.name,
+        quantity: qty,
+        unitPrice,
+        totalAmount: Number((unitPrice * qty).toFixed(2)),
+        provider: 'mercadopago',
+        paymentIntentId: 'mp_pending',
+        status: 'pending_mp',
+        recipientEmail: input.recipientEmail ?? 'attendee@example.com',
+      });
+      orders.push(await this.orderRepository.save(order));
+    }
+    return orders;
+  }
+
+  async confirmMpOrders(orderIds: string[], paymentId: string): Promise<void> {
+    for (const id of orderIds) {
+      const order = await this.orderRepository.findOneBy({ id });
+      if (!order) continue;
+      if (String(order.status || '').toLowerCase() === 'paid') continue;
+
+      await this.orderRepository.update({ id }, { status: 'paid', paymentIntentId: paymentId });
+      if (order.ticketId) {
+        await this.ticketRepository.update({ id: order.ticketId }, { status: 'paid' });
+      }
+
+      order.status = 'paid';
+      order.paymentIntentId = paymentId;
+      await this.publishPurchaseEffectsForOrder(order, 'paid');
+    }
+  }
+
+  /** Almacena el externalReference de la preferencia MP en cada orden para poder verificarla después */
+  async setOrdersRef(orderIds: string[], extRef: string): Promise<void> {
+    for (const id of orderIds) {
+      await this.orderRepository.update({ id, status: 'pending_mp' }, { paymentIntentId: extRef });
+    }
+  }
+
+  /** Devuelve todas las órdenes pending_mp de un usuario específico */
+  async getPendingMpOrdersByUser(userId: string): Promise<Order[]> {
+    return this.orderRepository.find({
+      where: { userId, status: 'pending_mp' },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async cancelMpOrders(orderIds: string[]): Promise<void> {
+    for (const id of orderIds) {
+      const order = await this.orderRepository.findOneBy({ id });
+      if (!order) continue;
+      if (order.status !== 'pending_mp') continue; // ya confirmado, no tocar
+      // Devolver stock
+      await this.ticketTypeRepository
+        .createQueryBuilder()
+        .update(TicketType)
+        .set({ quantitySold: () => `GREATEST(0, quantity_sold - ${order.quantity})` })
+        .where('id = :id', { id: order.ticketTypeId })
+        .execute();
+      await this.orderRepository.update({ id }, { status: 'cancelled' });
+    }
+  }
+
+  /** Cancela órdenes pending_mp con más de 30 minutos para liberar stock bloqueado */
+  private async cleanupStalePendingMpOrders(): Promise<void> {
+    try {
+      const cutoff = new Date(Date.now() - 30 * 60 * 1000);
+      const stale = await this.orderRepository
+        .createQueryBuilder('o')
+        .where('o.status = :status', { status: 'pending_mp' })
+        .andWhere('o.createdAt < :cutoff', { cutoff })
+        .getMany();
+      if (stale.length > 0) {
+        await this.cancelMpOrders(stale.map((o) => o.id));
+        this.logger.log(`[MP Cleanup] Canceladas ${stale.length} órdenes pending_mp expiradas`);
+      }
+    } catch (e) {
+      this.logger.warn('[MP Cleanup] Error limpiando órdenes expiradas: ' + e?.message);
+    }
   }
 }

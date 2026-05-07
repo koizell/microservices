@@ -1,5 +1,7 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query, Redirect, Req } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseUUIDPipe, Post, Query, Redirect, Req, UseGuards } from '@nestjs/common';
 import { NotificationService } from './notification.service';
+import { Roles } from './decorators/roles.decorator';
+import { RoleGuard } from './guards/role.guard';
 
 @Controller('notifications')
 export class NotificationController {
@@ -19,6 +21,8 @@ export class NotificationController {
   }
 
   @Post('data')
+  @UseGuards(RoleGuard)
+  @Roles('admin')
   async create(@Body() notification: { message: string; recipient: string; read?: boolean }) {
     return await this.notificationService.create({
       message: notification.message,
@@ -39,6 +43,13 @@ export class NotificationController {
     @Body() body: { to: string; name: string; resetUrl: string },
   ) {
     return await this.notificationService.sendPasswordResetEmail(body);
+  }
+
+  @Post('email/password-change-confirm')
+  async sendPasswordChangeConfirm(
+    @Body() body: { to: string; name: string; changeUrl: string },
+  ) {
+    return await this.notificationService.sendPasswordChangeConfirmEmail(body);
   }
 
   @Post('events/ticket-purchased')
@@ -99,11 +110,31 @@ export class NotificationController {
   }
 
   @Get('data')
-  async findAll(@Query('limit') limit?: string, @Query('recipient') recipient?: string) {
+  @UseGuards(RoleGuard)
+  @Roles('standard', 'admin')
+  async findAll(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('recipient') recipient?: string,
+  ) {
+    const role = String(req.user?.accountType || req.user?.role || 'guest').toLowerCase();
+    const requesterEmail = String(req.user?.email || '').trim().toLowerCase();
+    if (role !== 'admin') {
+      if (!requesterEmail) {
+        throw new ForbiddenException('No se pudo identificar al usuario');
+      }
+      const requestedRecipient = String(recipient || '').trim().toLowerCase();
+      if (requestedRecipient && requestedRecipient !== requesterEmail) {
+        throw new ForbiddenException('No puedes consultar notificaciones de otro usuario');
+      }
+      return await this.notificationService.findAll(Number(limit ?? 50), requesterEmail);
+    }
     return await this.notificationService.findAll(Number(limit ?? 50), recipient);
   }
 
   @Delete('data/:id')
+  @UseGuards(RoleGuard)
+  @Roles('admin')
   async remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return await this.notificationService.remove(id);
   }

@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Header, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Header, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
+import { Roles } from './decorators/roles.decorator';
+import { RoleGuard } from './guards/role.guard';
 
 @Controller('analytics')
 export class AnalyticsController {
@@ -101,6 +103,35 @@ export class AnalyticsController {
 
     function ticketBase() {
       return gatewayBase() + '/tickets';
+    }
+
+    function getSessionToken() {
+      try {
+        const hash = String(window.location.hash || '').replace(/^#/, '');
+        if (hash) {
+          const params = new URLSearchParams(hash);
+          const fromHash = params.get('token');
+          if (fromHash) return fromHash;
+        }
+      } catch (e) {}
+      return localStorage.getItem('eventhive.session.token') || '';
+    }
+
+    function parseJwtPayload(raw) {
+      try {
+        const part = String(raw || '').split('.')[1] || '';
+        const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
+        return JSON.parse(atob(normalized));
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function authHeaders(extra) {
+      const headers = Object.assign({}, extra || {});
+      const token = getSessionToken();
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      return headers;
     }
 
     function selectedTicket() {
@@ -221,8 +252,8 @@ export class AnalyticsController {
       }
       try {
         const responses = await Promise.all([
-          fetch('/analytics/data?' + params.toString()),
-          fetch('/analytics/history?' + params.toString()),
+          fetch('/analytics/data?' + params.toString(), { headers: authHeaders() }),
+          fetch('/analytics/history?' + params.toString(), { headers: authHeaders() }),
         ]);
         const dailyData = await responses[0].json();
         const salesData = await responses[1].json();
@@ -259,7 +290,15 @@ export class AnalyticsController {
 
     async function loadTicketTypes() {
       try {
-        const response = await fetch(ticketBase() + '/types?includeInactive=true');
+        const params = new URLSearchParams();
+        params.set('includeInactive', 'true');
+        const token = getSessionToken();
+        const payload = token ? parseJwtPayload(token) : null;
+        const orgId = String(payload?.sub || '').trim();
+        const orgEmail = String(payload?.email || '').trim().toLowerCase();
+        if (orgId) params.set('organizerId', orgId);
+        if (orgEmail) params.set('organizerEmail', orgEmail);
+        const response = await fetch(ticketBase() + '/types?' + params.toString(), { headers: authHeaders() });
         if (!response.ok) {
           throw new Error('No se pudo cargar tickets');
         }
@@ -316,23 +355,44 @@ export class AnalyticsController {
   }
 
   @Get('summary')
-  async summary() {
-    return await this.analyticsService.getSummary();
+  @UseGuards(RoleGuard)
+  @Roles('admin')
+  async summary(@Req() req: any) {
+    return await this.analyticsService.getSummary({
+      id: req.user?.sub,
+      email: req.user?.email,
+    });
   }
 
   @Get('data')
-  async listDailySales(@Query('limit') limit?: string, @Query('ticketTypeId') ticketTypeId?: string) {
+  @UseGuards(RoleGuard)
+  @Roles('admin')
+  async listDailySales(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('ticketTypeId') ticketTypeId?: string,
+  ) {
     return await this.analyticsService.listDailySales({
       limit: Number(limit ?? 30),
       ticketTypeId,
+      organizerId: req.user?.sub,
+      organizerEmail: req.user?.email,
     });
   }
 
   @Get('history')
-  async listSalesHistory(@Query('limit') limit?: string, @Query('ticketTypeId') ticketTypeId?: string) {
+  @UseGuards(RoleGuard)
+  @Roles('admin')
+  async listSalesHistory(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('ticketTypeId') ticketTypeId?: string,
+  ) {
     return await this.analyticsService.listSalesHistory({
       limit: Number(limit ?? 30),
       ticketTypeId,
+      organizerId: req.user?.sub,
+      organizerEmail: req.user?.email,
     });
   }
 }

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "nest start",
     "start:dev": "nest start --watch",
-    "build": "nest build"
+    "build": "nest build",
+    "test": "jest"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -26,7 +27,23 @@
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
     "@types/amqplib": "^0.10.7",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
+    "jest": "^30.0.0",
+    "ts-jest": "^29.2.5",
     "typescript": "^5.7.3"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "testEnvironment": "node"
   }
 }

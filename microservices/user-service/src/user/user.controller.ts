@@ -1,7 +1,7 @@
-﻿import { Body, Controller, Delete, Get, Header, Param, ParseUUIDPipe, Post, Put, Query, Res, UnauthorizedException, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+﻿import { Body, Controller, Delete, Get, Header, Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UnauthorizedException, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from './user.service';
-import { CreateUserDto, ForgotPasswordDto, ResetPasswordDto } from './user.dto';
+import { CreateUserDto, ForgotPasswordDto, ResetPasswordDto, UpdateProfileDto, RequestPasswordChangeDto, ConfirmPasswordChangeDto } from './user.dto';
 import { RoleGuard } from '../guards/role.guard';
 import { Roles } from '../decorators/roles.decorator';
 
@@ -1251,7 +1251,7 @@ async function deleteTicketType(id) {
 		return {
 			accessToken: token,
 			refreshToken,
-      user: this.toPublicUser(user),
+      user: this.toPublicProfileUser(user),
 		};
 	}
 
@@ -1349,6 +1349,51 @@ async function deleteTicketType(id) {
     };
   }
 
+  @Put('profile')
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  async updateProfile(@Body() body: UpdateProfileDto, @Req() req: Record<string, unknown>) {
+    const userId = this.extractUserIdFromRequest(req);
+    if (!userId) throw new UnauthorizedException('Sesion no valida');
+    const result = await this.userService.updateProfile(userId, body);
+    if (!result.ok) {
+      const msgMap: Record<string, string> = {
+        not_found: 'Usuario no encontrado',
+        password_required: 'Debes introducir tu contrasena actual para cambiar el nombre',
+        wrong_current_password: 'La contrasena actual no es correcta',
+      };
+      throw new UnauthorizedException(msgMap[result.reason ?? ''] ?? 'No se pudo actualizar el perfil');
+    }
+    return { message: 'Perfil actualizado', user: this.toPublicProfileUser(result.user!) };
+  }
+
+  @Post('auth/request-password-change')
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  async requestPasswordChange(@Body() body: RequestPasswordChangeDto, @Req() req: Record<string, unknown>) {
+    const userId = this.extractUserIdFromRequest(req);
+    if (!userId) throw new UnauthorizedException('Sesion no valida');
+    const result = await this.userService.requestPasswordChange(userId, body);
+    if (!result.ok) {
+      if (result.reason === 'wrong_current_password') throw new UnauthorizedException('La contraseña actual no es correcta');
+      throw new UnauthorizedException('No se pudo procesar el cambio de contraseña');
+    }
+    return {
+      message: 'Se envio un correo de confirmacion. Revisa tu bandeja de entrada.',
+      emailSent: result.emailSent,
+      previewUrl: result.previewUrl,
+    };
+  }
+
+  @Post('auth/confirm-password-change')
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  async confirmPasswordChange(@Body() body: ConfirmPasswordChangeDto) {
+    const result = await this.userService.confirmPasswordChange(body.token);
+    if (!result.ok) {
+      if (result.reason === 'expired') throw new UnauthorizedException('El enlace de confirmacion expiro');
+      throw new UnauthorizedException('El enlace de confirmacion no es valido');
+    }
+    return { message: 'Contraseña cambiada correctamente. Por favor vuelve a iniciar sesion.' };
+  }
+
   private toPublicUser(user: {
     id: string;
     name: string;
@@ -1365,6 +1410,25 @@ async function deleteTicketType(id) {
       isEmailVerified: Boolean(user.isEmailVerified),
       emailVerifiedAt: user.emailVerifiedAt ?? null,
     };
+  }
+
+  private toPublicProfileUser(user: {
+    id: string; name: string; email: string; accountType: string;
+    isEmailVerified?: boolean; emailVerifiedAt?: Date | null; avatarUrl?: string | null;
+  }) {
+    return { ...this.toPublicUser(user), avatarUrl: user.avatarUrl ?? null };
+  }
+
+  private extractUserIdFromRequest(req: Record<string, unknown>): string | null {
+    try {
+      const authHeader = (req as { headers?: { authorization?: string } }).headers?.authorization ?? '';
+      const token = authHeader.replace(/^Bearer\s+/i, '');
+      if (!token) return null;
+      const payload = this.jwtService.verify(token) as { sub?: string; id?: string };
+      return payload?.sub ?? payload?.id ?? null;
+    } catch {
+      return null;
+    }
   }
 }
 

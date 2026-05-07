@@ -1,5 +1,6 @@
 import { config as loadEnv } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
+import { json, urlencoded } from 'express';
 import { randomUUID } from 'crypto';
 import { resolve } from 'path';
 import prometheus from 'prom-client';
@@ -39,7 +40,9 @@ function isPublicServicePath(pathname: string) {
 
 async function bootstrap() {
   const { AppModule } = await import('./app.module.js');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.use(json({ limit: '5mb' }));
+  app.use(urlencoded({ extended: true, limit: '5mb' }));
   const server = app.getHttpAdapter().getInstance();
 
   // Middleware de correlationId
