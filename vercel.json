@@ -2,10 +2,13 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
   "trailingSlash": false,
+  "functions": {
+    "api/proxy.js": { "maxDuration": 60 }
+  },
   "rewrites": [
     {
       "source": "/",
-      "destination": "/frontend/views/index"
+      "destination": "/frontend/views/index.html"
     },
     {
       "source": "/css/:path*",

@@ -61,8 +61,121 @@ const notificationsState = {
   audience: null,
 };
 
+const wakeState = {
+  inFlight: null,
+  lastSuccessAt: 0,
+};
+
 const eyeOpen = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
 const eyeOff = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+
+function isRemoteDeployment() {
+  return !["localhost", "127.0.0.1", "::1"].includes(hostName);
+}
+
+function delay(ms) {
+  return new Promise(function (resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+
+function serviceFetchWithTimeout(serviceKey, path, init, timeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(function () {
+    controller.abort();
+  }, timeoutMs);
+
+  return serviceFetch(serviceKey, path, {
+    ...(init || {}),
+    signal: controller.signal,
+  }).finally(function () {
+    clearTimeout(timeoutId);
+  });
+}
+
+function setWakeButtonState(isLoading) {
+  const button = document.getElementById("wakeServicesBtn");
+  if (!button) {
+    return;
+  }
+
+  button.disabled = isLoading;
+  button.textContent = isLoading ? "Despertando servicios..." : "Despertar servicios";
+}
+
+async function wakeRenderServices(options) {
+  const settings = options || {};
+  const silent = Boolean(settings.silent);
+
+  if (!isRemoteDeployment()) {
+    return { ok: true, skipped: true };
+  }
+
+  if (wakeState.inFlight) {
+    return wakeState.inFlight;
+  }
+
+  if (Date.now() - wakeState.lastSuccessAt < 90000) {
+    return { ok: true, cached: true };
+  }
+
+  if (!silent) {
+    setAlert("alertLogin", "Despertando servicios en Render. La primera respuesta puede tardar unos segundos.", "info");
+  }
+
+  setWakeButtonState(true);
+
+  wakeState.inFlight = (async function () {
+    const checks = [
+      { serviceKey: "gateway", path: "/health" },
+      { serviceKey: "user", path: "/health" },
+      { serviceKey: "event", path: "/health" },
+      { serviceKey: "ticketing", path: "/health" },
+      { serviceKey: "notification", path: "/health" },
+      { serviceKey: "credential", path: "/health" },
+      { serviceKey: "agenda", path: "/health" },
+      { serviceKey: "analytics", path: "/health" },
+      { serviceKey: "mobile", path: "/health" },
+    ];
+
+    async function pingOnce(check) {
+      try {
+        const response = await serviceFetchWithTimeout(check.serviceKey, check.path, { method: "GET" }, 55000);
+        return response.ok;
+      } catch {
+        return false;
+      }
+    }
+
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const results = await Promise.all(checks.map(pingOnce));
+      const okCount = results.filter(Boolean).length;
+
+      if (okCount === checks.length) {
+        wakeState.lastSuccessAt = Date.now();
+        if (!silent) {
+          setAlert("alertLogin", "Servicios activos. Ya puedes iniciar sesion.", "info");
+        }
+        return { ok: true };
+      }
+
+      if (attempt < 4) {
+        await delay(5000);
+      }
+    }
+
+    if (!silent) {
+      setAlert("alertLogin", "Render sigue dormido o tardando en responder. Espera unos segundos y vuelve a intentarlo.", "err");
+    }
+
+    return { ok: false };
+  })().finally(function () {
+    setWakeButtonState(false);
+    wakeState.inFlight = null;
+  });
+
+  return wakeState.inFlight;
+}
 
 function serviceBase(serviceKey) {
   if (!Object.prototype.hasOwnProperty.call(servicePaths, serviceKey)) {
@@ -1608,9 +1721,18 @@ async function doLogin() {
   }
 
   button.disabled = true;
-  button.textContent = "Verificando...";
+  button.textContent = isRemoteDeployment() ? "Despertando servicios..." : "Verificando...";
 
   try {
+    if (isRemoteDeployment()) {
+      const wakeResult = await wakeRenderServices({ silent: false });
+      if (!wakeResult.ok) {
+        return;
+      }
+    }
+
+    button.textContent = "Verificando...";
+
     const response = await serviceFetch("user", "/auth/login", {
       method: "POST",
       body: { email: email, password: password },
@@ -1620,6 +1742,9 @@ async function doLogin() {
     const rawText = payload.rawText.trim();
 
     if (!response.ok) {
+      if (response.status >= 500 && isRemoteDeployment()) {
+        throw new Error(data.message || "El backend no respondio correctamente. Pulsa 'Despertar servicios' y reintenta en unos segundos.");
+      }
       throw new Error(data.message || "Credenciales incorrectas");
     }
 
@@ -1896,6 +2021,11 @@ window.addEventListener("DOMContentLoaded", function () {
   document.getElementById("tpReg").innerHTML = eyeOpen;
   document.getElementById("tpReset").innerHTML = eyeOpen;
 
+  const wakeButton = document.getElementById("wakeServicesBtn");
+  if (wakeButton) {
+    wakeButton.style.display = isRemoteDeployment() ? "" : "none";
+  }
+
   const confirmed = getParam("confirmed");
   const resetParam = getParam("resetToken");
 
@@ -1926,6 +2056,9 @@ window.addEventListener("DOMContentLoaded", function () {
   }
 
   showView("vLogin");
+  wakeRenderServices({ silent: true }).catch(function () {
+    return null;
+  });
   restoreSessionState();
 });
 
