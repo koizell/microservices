@@ -2,15 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
   "trailingSlash": false,
-  "functions": {
-    "api/proxy.js": { "maxDuration": 60 },
-    "api/proxy/[[...path]].js": { "maxDuration": 60 }
-  },
   "rewrites": [
-    {
-      "source": "/",
-      "destination": "/views/index.html"
-    },
     {
       "source": "/:service(gateway|users|events|tickets|notifications|credentials|analytics|agenda|mobile)",
       "destination": "/api/proxy?service=:service"
