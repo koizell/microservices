@@ -2628,6 +2628,17 @@ export class TicketController {
     };
   }
 
+  private getFrontendUrl(): string {
+    const raw = String(
+      process.env.FRONTEND_URL ??
+      process.env.APP_BASE_URL ??
+      process.env.MP_BACK_URL_SUCCESS ??
+      'http://localhost:3009',
+    ).trim();
+    // Si viene de MP_BACK_URL_SUCCESS quita la cola /tickets/mp/...
+    return raw.replace(/\/tickets\/mp\/[a-z]+\/?$/i, '').replace(/\/+$/, '');
+  }
+
   @Get('mp/success')
   @Header('Content-Type', 'text/html; charset=utf-8')
   async mpSuccess(@Query() q: any) {
@@ -2643,8 +2654,9 @@ export class TicketController {
       } catch (_) {}
     }
 
+    const home = this.getFrontendUrl();
     return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<meta http-equiv="refresh" content="3;url=http://localhost:3009">
+<meta http-equiv="refresh" content="3;url=${home}">
 <title>Pago exitoso</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f0fdf4}
 .card{background:#fff;border-radius:16px;padding:40px 48px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.09);max-width:420px}
@@ -2653,7 +2665,7 @@ export class TicketController {
 </head><body><div class="card"><div class="icon">✅</div>
 <div class="title">¡Pago aprobado!</div>
 <div class="sub">Tu compra fue procesada correctamente.<br>Redirigiendo a la aplicación en 3 segundos…</div>
-<a class="btn" href="http://localhost:3009">Volver ahora</a></div></body></html>`;
+<a class="btn" href="${home}">Volver ahora</a></div></body></html>`;
   }
 
   @Get('mp/failure')
@@ -2666,8 +2678,9 @@ export class TicketController {
         await this.ticketService.cancelMpOrders(orderIds);
       } catch (_) {}
     }
+    const home = this.getFrontendUrl();
     return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<meta http-equiv="refresh" content="4;url=http://localhost:3009">
+<meta http-equiv="refresh" content="4;url=${home}">
 <title>Pago fallido</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fff1f2}
 .card{background:#fff;border-radius:16px;padding:40px 48px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.09);max-width:420px}
@@ -2676,23 +2689,86 @@ export class TicketController {
 </head><body><div class="card"><div class="icon">❌</div>
 <div class="title">Pago rechazado</div>
 <div class="sub">No se pudo procesar el pago. Tu reserva fue liberada.<br>Redirigiendo en 4 segundos…</div>
-<a class="btn" href="http://localhost:3009">Intentar de nuevo</a></div></body></html>`;
+<a class="btn" href="${home}">Intentar de nuevo</a></div></body></html>`;
   }
 
   @Get('mp/pending')
   @Header('Content-Type', 'text/html; charset=utf-8')
-  mpPending() {
+  mpPending(@Query() q: any) {
+    const home = this.getFrontendUrl();
+    const extRef = String(q.external_reference ?? '').trim();
+    const orderIdsCsv = extRef.split(',').map((s) => s.trim()).filter(Boolean).join(',');
+    const sandbox = this.mpService.isSandbox();
     return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<meta http-equiv="refresh" content="5;url=http://localhost:3009">
 <title>Pago pendiente</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fffbeb}
-.card{background:#fff;border-radius:16px;padding:40px 48px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.09);max-width:420px}
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#fffbeb;padding:20px}
+.card{background:#fff;border-radius:16px;padding:40px 48px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.09);max-width:520px;width:100%}
 .icon{font-size:56px;margin-bottom:16px}.title{font-size:22px;font-weight:800;color:#92400e;margin-bottom:8px}
-.sub{color:#64748b;font-size:14px;line-height:1.6}.btn{display:inline-block;margin-top:22px;padding:10px 28px;background:#d97706;color:#fff;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px}</style>
+.sub{color:#64748b;font-size:14px;line-height:1.6;margin-bottom:18px}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.btn{display:inline-block;padding:10px 22px;color:#fff;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;border:0;cursor:pointer}
+.btnHome{background:#d97706}
+.btnSandbox{background:#1d4ed8}
+.btnGhost{background:#fff;color:#1e3a8a;border:1px solid #bfdbfe}
+.statusMsg{margin-top:14px;font-size:13px;color:#475569;min-height:18px}
+.sandboxBox{margin-top:18px;padding:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;font-size:13px;color:#1e3a8a;text-align:left}
+.sandboxBox b{display:block;margin-bottom:4px}
+</style>
 </head><body><div class="card"><div class="icon">⏳</div>
-<div class="title">Pago pendiente</div>
-<div class="sub">Tu pago está siendo procesado. Te notificaremos cuando se confirme.<br>Redirigiendo en 5 segundos…</div>
-<a class="btn" href="http://localhost:3009">Volver a la app</a></div></body></html>`;
+<div class="title">Verificando pago…</div>
+<div class="sub">Estamos confirmando tu transacción con MercadoPago. Esto puede tardar unos segundos.</div>
+<div class="row">
+  <a class="btn btnHome" href="${home}">Volver a la app</a>
+  <button class="btn btnGhost" type="button" onclick="poll()">Verificar de nuevo</button>
+</div>
+<div id="status" class="statusMsg"></div>
+${sandbox && orderIdsCsv ? `<div class="sandboxBox"><b>Modo TEST detectado</b>Si el checkout sandbox de MP se quedó colgado, puedes confirmar manualmente tu compra como pagada (solo en sandbox):<div class="row" style="margin-top:10px"><button class="btn btnSandbox" type="button" onclick="sandboxConfirm()">Confirmar pago (sandbox)</button></div></div>` : ''}
+<script>
+const ORDERS = ${JSON.stringify(orderIdsCsv.split(',').filter(Boolean))};
+const HOME = ${JSON.stringify(home)};
+const SANDBOX = ${sandbox ? 'true' : 'false'};
+const TOKEN_KEY = 'eventhive.session.token';
+const statusEl = document.getElementById('status');
+function getToken(){ try { return localStorage.getItem(TOKEN_KEY) || ''; } catch(_) { return ''; } }
+function authHeaders(extra){ const h = Object.assign({}, extra || {}); const t = getToken(); if (t) h.Authorization = 'Bearer ' + t; return h; }
+async function poll(){
+  if (!getToken()) { statusEl.textContent='Necesitas iniciar sesion en la app para verificar. Abre la app y vuelve.'; return; }
+  statusEl.textContent='Consultando estado…';
+  try {
+    const r = await fetch('/tickets/mp/check-pending', { method:'GET', headers: authHeaders() });
+    if (r.status === 401) { statusEl.textContent='Sesion expirada. Vuelve a la app.'; return; }
+    const data = await r.json();
+    if (data.confirmed > 0) {
+      statusEl.textContent='Pago confirmado. Redirigiendo…';
+      setTimeout(()=>location.href=HOME, 1200);
+      return;
+    }
+    statusEl.textContent = data.message || 'Aun no hay confirmacion. Intenta de nuevo en unos segundos.';
+  } catch(e){ statusEl.textContent='Error consultando. Intenta de nuevo.'; }
+}
+async function sandboxConfirm(){
+  if (!SANDBOX || ORDERS.length === 0) return;
+  if (!getToken()) { statusEl.textContent='Necesitas iniciar sesion en la app primero. Abre la app y regresa a esta pestaña.'; return; }
+  statusEl.textContent='Confirmando en modo sandbox…';
+  let ok = 0;
+  for (const id of ORDERS) {
+    try {
+      const r = await fetch('/tickets/mp/sandbox-confirm/' + id, { method:'POST', headers: authHeaders({'Content-Type':'application/json'}), body:'{}' });
+      if (r.ok) ok++;
+    } catch(_) {}
+  }
+  if (ok > 0) {
+    statusEl.textContent='Confirmado ' + ok + ' orden(es). Redirigiendo…';
+    setTimeout(()=>location.href=HOME, 1200);
+  } else {
+    statusEl.textContent='No se pudo confirmar. Verifica que estes autenticado en la app.';
+  }
+}
+// Poll automatico cada 5s mientras la pestaña este visible
+setInterval(()=>{ if (document.visibilityState==='visible' && getToken()) poll(); }, 5000);
+poll();
+</script>
+</div></body></html>`;
   }
 
   // ─── Fin MercadoPago ─────────────────────────────────────────────────────
