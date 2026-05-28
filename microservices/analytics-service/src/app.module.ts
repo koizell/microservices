@@ -22,6 +22,7 @@ const databaseUrl = String(process.env.DATABASE_URL ?? '').trim();
       ...(databaseUrl
         ? {
             url: databaseUrl,
+            ssl: { rejectUnauthorized: false },
           }
         : {
             host: process.env.DB_HOST ?? 'localhost',

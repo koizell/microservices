@@ -21,6 +21,7 @@ const shouldSynchronize = String(
       ...(databaseUrl
         ? {
             url: databaseUrl,
+            ssl: { rejectUnauthorized: false },
           }
         : {
             host: process.env.DB_HOST ?? 'localhost',
