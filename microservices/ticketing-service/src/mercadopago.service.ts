@@ -77,19 +77,26 @@ export class MercadoPagoService {
       external_reference: externalReference,
     };
 
-    // MP rechaza auto_return cuando back_urls apuntan a localhost
-    if (isPublicUrl(successUrl)) {
+    // En sandbox quitamos auto_return y excluded_payment_types — son los dos
+    // campos que con mayor frecuencia hacen que la UI sandbox de MP cuelgue el
+    // boton Continuar. En produccion (token APP_USR-) se mantienen los originales
+    // porque ahi auto_return ahorra un click al usuario y excluir wallets evita
+    // que el comprador pague con saldo MP del vendedor.
+    const isProd = !String(process.env.MP_ACCESS_TOKEN ?? '').trim().startsWith('TEST-');
+
+    if (isProd && isPublicUrl(successUrl)) {
       body.auto_return = 'approved';
     }
 
-    // Excluir wallets/Nequi para forzar ingreso manual de tarjeta (evita bloqueo en sandbox con cuenta vendedor)
-    body.payment_methods = {
-      excluded_payment_types: [
-        { id: 'digital_currency' },
-        { id: 'digital_wallet' },
-        { id: 'bank_transfer' },
-      ],
-    };
+    if (isProd) {
+      body.payment_methods = {
+        excluded_payment_types: [
+          { id: 'digital_currency' },
+          { id: 'digital_wallet' },
+          { id: 'bank_transfer' },
+        ],
+      };
+    }
 
     if (webhookUrl) body.notification_url = webhookUrl;
     // No enviar payer.email para evitar que MP asocie el pago con la cuenta del vendedor en sandbox
