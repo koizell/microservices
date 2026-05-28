@@ -1,0 +1,61 @@
+name: keep-alive
+
+# Mantiene calientes los 9 servicios de EventHive en Render free tier.
+# Render duerme servicios tras ~15 min sin trafico; este workflow corre cada
+# 10 min via cron y golpea cada /health para que no entren en spin-down.
+#
+# Tambien suma un probe al frontend en Vercel.
+#
+# Costo: 9 requests/run + 1 = 10 requests cada 10 min ~= 1440 requests/dia.
+# Tiempo de ejecucion: ~30-90s por run (cold-starts cuentan).
+# Free tier de GitHub Actions: 2000 min/mes para repos privados; ilimitado
+# para publicos. Este workflow consume ~75 min/mes, comodamente dentro.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # cada 10 minutos
+  workflow_dispatch:        # permite dispararlo manual desde la UI de Actions
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe all health endpoints
+        run: |
+          set +e
+          targets=(
+            "https://eventhive-api-gateway.onrender.com/gateway/health|api-gateway"
+            "https://eventhive-user-service.onrender.com/users/health|user-service"
+            "https://eventhive-event-service.onrender.com/events/health|event-service"
+            "https://eventhive-ticketing-service.onrender.com/tickets/health|ticketing-service"
+            "https://eventhive-notification-service.onrender.com/notifications/health|notification-service"
+            "https://eventhive-credential-service.onrender.com/credentials/health|credential-service"
+            "https://eventhive-agenda-service.onrender.com/agenda/health|agenda-service"
+            "https://eventhive-analytics-service.onrender.com/analytics/health|analytics-service"
+            "https://eventhive-mobile-api-service.onrender.com/mobile/health|mobile-api-service"
+            "https://eventhive-frontend-pi.vercel.app/gateway/health|vercel-proxy"
+          )
+
+          declare -i ok=0 fail=0
+          for entry in "${targets[@]}"; do
+            url="${entry%%|*}"
+            name="${entry##*|}"
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$url")
+            if [ "$code" = "200" ]; then
+              echo "::notice title=$name::200 OK"
+              ok=$((ok+1))
+            else
+              echo "::warning title=$name::HTTP $code (no-200)"
+              fail=$((fail+1))
+            fi
+          done
+
+          echo "Healthy: $ok / $((ok+fail))"
+          # No fallar el job por servicios caidos: el objetivo es solo despertarlos.
+          # Las warnings quedan en el job log para que veas tendencias.
+          exit 0
