@@ -58,4 +58,20 @@ jobs:
           echo "Healthy: $ok / $((ok+fail))"
           # No fallar el job por servicios caidos: el objetivo es solo despertarlos.
           # Las warnings quedan en el job log para que veas tendencias.
+
+      - name: Keep Supabase warm
+        # Health pings no tocan la DB. Supabase free pausa a 7 dias sin actividad.
+        # Un POST login con credenciales falsas dispara user-service -> findByEmail
+        # -> SELECT contra Supabase, lo cual cuenta como actividad para el auto-pause.
+        # Esperamos 401 Credenciales invalidas; cualquier otra cosa solo se loguea.
+        run: |
+          response=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 90 \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"email":"keepalive@noreply.invalid","password":"keepalive"}' \
+            https://eventhive-api-gateway.onrender.com/users/auth/login)
+          case "$response" in
+            401) echo "::notice title=supabase-ping::DB awake (401 expected)" ;;
+            429) echo "::warning title=supabase-ping::Render hibernate-rate-limited ($response). User-service just woke; DB ping no es definitivo." ;;
+            *)   echo "::warning title=supabase-ping::Respuesta inesperada $response. Posible Supabase down/paused o secret rotation." ;;
+          esac
           exit 0
