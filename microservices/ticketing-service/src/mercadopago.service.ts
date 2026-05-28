@@ -36,6 +36,11 @@ export class MercadoPagoService {
     return this.client !== null;
   }
 
+  isSandbox(): boolean {
+    const token = String(process.env.MP_ACCESS_TOKEN ?? '').trim();
+    return token.startsWith('TEST-');
+  }
+
   async createPreference(
     items: MpItem[],
     externalReference: string,

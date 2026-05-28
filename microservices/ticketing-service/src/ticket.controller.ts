@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { BadRequestException, Body, Controller, Delete, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Header, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { TicketService } from './ticket.service';
 import { MercadoPagoService } from './mercadopago.service';
 import { RoleGuard } from './guards/role.guard';
@@ -2483,11 +2483,16 @@ export class TicketController {
       // Guardar externalReference en cada orden para poder verificarla después
       await this.ticketService.setOrdersRef(pendingOrders.map((o) => o.id), externalReference);
 
+      const orderIds = pendingOrders.map((o) => o.id);
       return {
         preferenceId: preference.id,
         init_point: preference.init_point,
         sandbox_init_point: preference.sandbox_init_point,
-        orderIds: pendingOrders.map((o) => o.id),
+        orderIds,
+        sandbox: this.mpService.isSandbox(),
+        sandboxConfirmPaths: this.mpService.isSandbox()
+          ? orderIds.map((id) => `/tickets/mp/sandbox-confirm/${id}`)
+          : undefined,
       };
     } catch (err) {
       // Si hay órdenes creadas pero MP falló, cancelarlas y devolver stock
@@ -2547,6 +2552,38 @@ export class TicketController {
     const paymentId = String(body?.paymentId || '').trim() || `manual-${Date.now()}`;
     await this.ticketService.confirmMpOrders([id], paymentId);
     return { ok: true, orderId: id, paymentId };
+  }
+
+  // Auto-confirmacion sandbox: el participante confirma su propia orden pending_mp
+  // cuando el checkout sandbox de MP falla (UI colgada, login cruzado, tarjeta de
+  // otro pais). Solo aceptado si MP esta en modo TEST y la orden pertenece al
+  // usuario que llama. En produccion con APP_USR- responde 403.
+  @Post('mp/sandbox-confirm/:id')
+  @UseGuards(RoleGuard)
+  @Roles('standard')
+  async sandboxConfirmOwnOrder(
+    @Req() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    if (!this.mpService.isSandbox()) {
+      throw new ForbiddenException('Sandbox-confirm solo disponible en modo TEST');
+    }
+    const order = await this.ticketService.findOrderById(id);
+    if (!order) throw new BadRequestException('Orden no encontrada');
+    const requesterId = String(req.user?.sub ?? req.user?.id ?? '').trim();
+    if (!requesterId || String(order.userId || '').trim() !== requesterId) {
+      throw new ForbiddenException('Solo puedes confirmar tus propias ordenes');
+    }
+    const status = String(order.status || '').toLowerCase();
+    if (status === 'paid') {
+      return { ok: true, alreadyPaid: true, orderId: id };
+    }
+    if (status !== 'pending_mp') {
+      throw new BadRequestException(`Orden en estado ${status}, no se puede sandbox-confirm`);
+    }
+    const paymentId = `sandbox-${Date.now()}`;
+    await this.ticketService.confirmMpOrders([id], paymentId);
+    return { ok: true, orderId: id, paymentId, mode: 'sandbox' };
   }
 
   /**
