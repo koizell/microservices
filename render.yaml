@@ -72,6 +72,22 @@ services:
         value: https://eventhive-credential-service.onrender.com
       - key: NOTIFICATION_SERVICE_URL
         value: https://eventhive-notification-service.onrender.com
+      - key: MP_ACCESS_TOKEN
+        sync: false
+      - key: MP_BACK_URL_SUCCESS
+        value: https://eventhive-frontend-pi.vercel.app/tickets/mp/success
+      - key: MP_BACK_URL_FAILURE
+        value: https://eventhive-frontend-pi.vercel.app/tickets/mp/failure
+      - key: MP_BACK_URL_PENDING
+        value: https://eventhive-frontend-pi.vercel.app/tickets/mp/pending
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_MODE
+        value: sandbox
 
   - type: web
     runtime: node
