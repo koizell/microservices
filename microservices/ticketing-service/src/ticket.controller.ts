@@ -2145,56 +2145,44 @@ export class TicketController {
         const d = await r.json().catch(function(){ return {}; });
         if (!r.ok) throw new Error(d.message || 'No se pudo iniciar el pago con MercadoPago');
 
-        // Redirigir al checkout de MercadoPago
-        const checkoutUrl = d.sandbox_init_point || d.init_point;
-        if (!checkoutUrl) throw new Error('No se recibio la URL de pago de MercadoPago');
-        // Abrir en la pestaña completa (el checkout corre en un iframe, MP bloquea iframes)
-        window.open(checkoutUrl, '_blank');
+        const orderIds = Array.isArray(d.orderIds) ? d.orderIds : [];
 
-        // Modo sandbox: ofrecer atajo de auto-confirmacion dentro de la app
-        // (cuando la UI sandbox de MP se cuelga, el usuario igual puede cerrar el flujo).
-        if (d.sandbox === true && Array.isArray(d.sandboxConfirmPaths) && d.sandboxConfirmPaths.length) {
-          const orderIds = Array.isArray(d.orderIds) ? d.orderIds : [];
-          const cartMsg = document.getElementById('cartMsg');
-          if (cartMsg) {
-            cartMsg.innerHTML = ''
-              + '<div style="margin-top:14px;padding:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;text-align:left;color:#1e3a8a;font-size:13px">'
-              + '<b style="display:block;margin-bottom:6px">Modo TEST de MercadoPago</b>'
-              + 'Abrimos el checkout sandbox en otra pestaña. Si la UI de MP se queda colgada despues de "Continuar", usa este atajo para confirmar tu compra simulada sin pelear con el form de MP.'
-              + '<div style="margin-top:10px"><button id="sandboxConfirmBtn" type="button" '
-              + 'style="background:#1d4ed8;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-weight:700;cursor:pointer">'
-              + 'Confirmar pago (sandbox)</button>'
-              + '<span id="sandboxConfirmStatus" style="margin-left:10px;color:#475569"></span></div>'
-              + '</div>';
-            const btn = document.getElementById('sandboxConfirmBtn');
-            const statusEl = document.getElementById('sandboxConfirmStatus');
-            if (btn) {
-              btn.onclick = async function() {
-                btn.disabled = true;
-                statusEl.textContent = 'Confirmando…';
-                let ok = 0;
-                for (const id of orderIds) {
-                  try {
-                    const rr = await apiFetch(API + '/mp/sandbox-confirm/' + id, {
-                      method: 'POST',
-                      headers: authHeaders({ 'Content-Type': 'application/json' }),
-                      body: '{}',
-                    });
-                    if (rr.ok) ok++;
-                  } catch (_) {}
-                }
-                if (ok > 0) {
-                  statusEl.textContent = 'OK (' + ok + ' orden(es)). Recargando…';
-                  setTimeout(function(){ location.reload(); }, 900);
-                } else {
-                  statusEl.textContent = 'No se pudo confirmar. Verifica tu sesion.';
-                  btn.disabled = false;
-                }
-              };
-            }
+        // Modo sandbox (TEST-): saltar la UI de MercadoPago — la sandbox cuelga
+        // a menudo (cuenta vendedor = cuenta compradora, tarjetas cross-region,
+        // bugs de la propia sandbox). Confirmamos directo cada orden via el
+        // endpoint de auto-confirmacion del participante. En produccion (APP_USR-)
+        // d.sandbox es false y este bloque no corre — se mantiene el redirect a MP.
+        if (d.sandbox === true && orderIds.length) {
+          if (buyBtn) buyBtn.textContent = 'Confirmando pago (sandbox)…';
+          setMsg('cartMsg', 'Modo TEST: confirmando compra simulada sin abrir MercadoPago…', 'info');
+          let confirmed = 0;
+          for (const id of orderIds) {
+            try {
+              const rr = await apiFetch(API + '/mp/sandbox-confirm/' + id, {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: '{}',
+              });
+              if (rr.ok) confirmed++;
+            } catch (_) {}
           }
+          if (confirmed === orderIds.length) {
+            setMsg('cartMsg', '✅ Compra confirmada (sandbox). Actualizando…', 'ok');
+            setTimeout(function(){ location.reload(); }, 900);
+          } else if (confirmed > 0) {
+            setMsg('cartMsg', '⚠️ Solo ' + confirmed + ' de ' + orderIds.length + ' orden(es) confirmadas. Recarga manualmente.', 'err');
+            if (buyBtn) { buyBtn.disabled = false; buyBtn.textContent = 'Comprar seleccionados'; }
+          } else {
+            setMsg('cartMsg', 'No se pudo auto-confirmar. Tu orden quedo pendiente.', 'err');
+            if (buyBtn) { buyBtn.disabled = false; buyBtn.textContent = 'Comprar seleccionados'; }
+          }
+          return;
         }
 
+        // Produccion: redirigir al checkout real de MercadoPago en otra pestaña
+        const checkoutUrl = d.init_point;
+        if (!checkoutUrl) throw new Error('No se recibio la URL de pago de MercadoPago');
+        window.open(checkoutUrl, '_blank');
         if (buyBtn) { buyBtn.disabled = false; buyBtn.textContent = 'Comprar seleccionados'; }
       } catch (e) {
         setMsg('cartMsg', e.message, 'err');
