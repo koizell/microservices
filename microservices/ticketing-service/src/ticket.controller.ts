@@ -2150,6 +2150,52 @@ export class TicketController {
         if (!checkoutUrl) throw new Error('No se recibio la URL de pago de MercadoPago');
         // Abrir en la pestaña completa (el checkout corre en un iframe, MP bloquea iframes)
         window.open(checkoutUrl, '_blank');
+
+        // Modo sandbox: ofrecer atajo de auto-confirmacion dentro de la app
+        // (cuando la UI sandbox de MP se cuelga, el usuario igual puede cerrar el flujo).
+        if (d.sandbox === true && Array.isArray(d.sandboxConfirmPaths) && d.sandboxConfirmPaths.length) {
+          const orderIds = Array.isArray(d.orderIds) ? d.orderIds : [];
+          const cartMsg = document.getElementById('cartMsg');
+          if (cartMsg) {
+            cartMsg.innerHTML = ''
+              + '<div style="margin-top:14px;padding:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;text-align:left;color:#1e3a8a;font-size:13px">'
+              + '<b style="display:block;margin-bottom:6px">Modo TEST de MercadoPago</b>'
+              + 'Abrimos el checkout sandbox en otra pestaña. Si la UI de MP se queda colgada despues de "Continuar", usa este atajo para confirmar tu compra simulada sin pelear con el form de MP.'
+              + '<div style="margin-top:10px"><button id="sandboxConfirmBtn" type="button" '
+              + 'style="background:#1d4ed8;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-weight:700;cursor:pointer">'
+              + 'Confirmar pago (sandbox)</button>'
+              + '<span id="sandboxConfirmStatus" style="margin-left:10px;color:#475569"></span></div>'
+              + '</div>';
+            const btn = document.getElementById('sandboxConfirmBtn');
+            const statusEl = document.getElementById('sandboxConfirmStatus');
+            if (btn) {
+              btn.onclick = async function() {
+                btn.disabled = true;
+                statusEl.textContent = 'Confirmando…';
+                let ok = 0;
+                for (const id of orderIds) {
+                  try {
+                    const rr = await apiFetch(API + '/mp/sandbox-confirm/' + id, {
+                      method: 'POST',
+                      headers: authHeaders({ 'Content-Type': 'application/json' }),
+                      body: '{}',
+                    });
+                    if (rr.ok) ok++;
+                  } catch (_) {}
+                }
+                if (ok > 0) {
+                  statusEl.textContent = 'OK (' + ok + ' orden(es)). Recargando…';
+                  setTimeout(function(){ location.reload(); }, 900);
+                } else {
+                  statusEl.textContent = 'No se pudo confirmar. Verifica tu sesion.';
+                  btn.disabled = false;
+                }
+              };
+            }
+          }
+        }
+
+        if (buyBtn) { buyBtn.disabled = false; buyBtn.textContent = 'Comprar seleccionados'; }
       } catch (e) {
         setMsg('cartMsg', e.message, 'err');
         if (buyBtn) { buyBtn.disabled = false; buyBtn.textContent = 'Comprar seleccionados'; }
