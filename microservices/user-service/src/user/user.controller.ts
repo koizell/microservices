@@ -1173,7 +1173,9 @@ async function deleteTicketType(id) {
 	@Post('data')
 	@UsePipes(new ValidationPipe({ transform: true }))
 	async create(@Body() user: CreateUserDto) {
-    const result = await this.userService.create(user);
+    // Registro publico: nunca aceptar accountType del cliente (privilege escalation).
+    const safeUser: CreateUserDto = { ...user, accountType: 'standard' };
+    const result = await this.userService.create(safeUser);
     return {
       message: 'Cuenta creada. Debes confirmar tu correo para activarla.',
       requiresEmailConfirmation: result.requiresEmailConfirmation,

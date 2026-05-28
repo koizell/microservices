@@ -5,7 +5,7 @@ export class Session {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'event_id' })
   eventId: string;
 
   @Column()
@@ -14,10 +14,10 @@ export class Session {
   @Column({ type: 'text' })
   description: string;
 
-  @Column({ type: 'timestamp' })
+  @Column({ name: 'start_time', type: 'timestamp' })
   startTime: Date;
 
-  @Column({ type: 'timestamp' })
+  @Column({ name: 'end_time', type: 'timestamp' })
   endTime: Date;
 
   @Column()
@@ -26,6 +26,6 @@ export class Session {
   @Column({ default: 0 })
   capacity: number;
 
-  @Column({ default: '' })
+  @Column({ name: 'speaker_name', default: '' })
   speakerName: string;
 }

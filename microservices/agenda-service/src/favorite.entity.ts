@@ -5,12 +5,12 @@ export class Favorite {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ name: 'user_id' })
   userId: string;
 
-  @Column()
+  @Column({ name: 'session_id' })
   sessionId: string;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ name: 'created_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }
