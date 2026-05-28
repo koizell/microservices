@@ -564,6 +564,7 @@ export class TicketService implements OnModuleInit {
       }
       if (!includeInactive) {
         query.andWhere('tt.isActive = :isActive', { isActive: true });
+        query.andWhere('tt.archivedAt IS NULL');
       }
       return query.orderBy('tt.createdAt', 'DESC');
     };
@@ -574,6 +575,32 @@ export class TicketService implements OnModuleInit {
     if (countersChanged || archiveChanged) {
       ticketTypes = await buildQuery().getMany();
     }
+
+    // Catalogo publico: verificar contra event-service y excluir ticket types
+    // cuyo evento no se pueda confirmar como activo (archivado, finalizado o no
+    // localizable). Sin esto, una sync que falla por cold-start del event-service
+    // deja stale en BD ticket types de eventos archivados.
+    if (!includeInactive && ticketTypes.length > 0) {
+      const cache = new Map<string, any>();
+      const visible: TicketType[] = [];
+      for (const ticketType of ticketTypes) {
+        if (!ticketType.eventId) {
+          visible.push(ticketType);
+          continue;
+        }
+        const event = await this.getEventSnapshot(ticketType.eventId, cache);
+        if (!event) {
+          continue;
+        }
+        const status = String(event.status || '').toLowerCase();
+        if (status === 'finished' || event.isArchived === true) {
+          continue;
+        }
+        visible.push(ticketType);
+      }
+      return visible;
+    }
+
     return ticketTypes;
   }
 
