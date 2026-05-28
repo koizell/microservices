@@ -1291,6 +1291,10 @@ export class TicketService implements OnModuleInit {
     return orders;
   }
 
+  async findOrderById(id: string): Promise<Order | null> {
+    return await this.orderRepository.findOneBy({ id });
+  }
+
   async confirmMpOrders(orderIds: string[], paymentId: string): Promise<void> {
     for (const id of orderIds) {
       const order = await this.orderRepository.findOneBy({ id });

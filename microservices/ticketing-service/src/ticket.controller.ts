@@ -2529,6 +2529,26 @@ export class TicketController {
     return { ok: true };
   }
 
+  // Bypass admin para QA / demo: marca una orden pending_mp como pagada sin pasar
+  // por la pasarela. Dispara credencial + notificacion igual que el webhook real.
+  @Post('orders/:id/mark-paid')
+  @UseGuards(RoleGuard)
+  @Roles('admin')
+  async adminMarkOrderPaid(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { paymentId?: string } = {},
+  ) {
+    const order = await this.ticketService.findOrderById(id);
+    if (!order) throw new BadRequestException('Orden no encontrada');
+    const status = String(order.status || '').toLowerCase();
+    if (status === 'paid') {
+      return { ok: true, alreadyPaid: true, orderId: id };
+    }
+    const paymentId = String(body?.paymentId || '').trim() || `manual-${Date.now()}`;
+    await this.ticketService.confirmMpOrders([id], paymentId);
+    return { ok: true, orderId: id, paymentId };
+  }
+
   /**
    * Verifica en la API de MP si alguna orden pending_mp del usuario ya fue pagada.
    * Confirma automáticamente las que encuentra aprobadas.
