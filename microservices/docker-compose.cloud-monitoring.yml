@@ -1,0 +1,71 @@
+version: '3.9'
+
+# Stack de observabilidad local que monitorea el deploy productivo
+# (Render + Supabase + Vercel). Levantar con:
+#
+#   cd microservices
+#   cp .env.cloud-monitoring.example .env.cloud-monitoring
+#   # editar .env.cloud-monitoring con SUPABASE_DATABASE_URL real
+#   docker compose -f docker-compose.cloud-monitoring.yml --env-file .env.cloud-monitoring up -d
+#
+# Acceso:
+#   Prometheus: http://localhost:9091
+#   Grafana:    http://localhost:3011   (admin / admin)
+#
+# Puertos elegidos en +1 sobre los de docker-compose.infrastructure.yml para
+# poder correr ambos stacks simultaneamente sin conflicto.
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: eventhive-prometheus-cloud
+    ports:
+      - '9091:9090'
+    volumes:
+      - ./prometheus.cloud.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_cloud_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: eventhive-grafana-cloud
+    ports:
+      - '3011:3000'
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - grafana_cloud_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: eventhive-postgres-exporter
+    environment:
+      # Apunta a Supabase. Valor cargado desde .env.cloud-monitoring (no commiteado).
+      DATA_SOURCE_NAME: '${SUPABASE_DATABASE_URL}'
+      PG_EXPORTER_DISABLE_DEFAULT_METRICS: 'false'
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: 'false'
+    ports:
+      - '9187:9187'
+    restart: unless-stopped
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: eventhive-blackbox-exporter
+    ports:
+      - '9115:9115'
+    restart: unless-stopped
+
+volumes:
+  prometheus_cloud_data:
+  grafana_cloud_data:

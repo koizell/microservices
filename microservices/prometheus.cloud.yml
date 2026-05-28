@@ -1,0 +1,67 @@
+global:
+  scrape_interval: 60s
+  scrape_timeout: 45s
+  evaluation_interval: 60s
+  external_labels:
+    monitor: eventhive-cloud
+
+scrape_configs:
+  # Microservicios desplegados en Render. /metrics es publico (no protegido por INTERNAL_API_KEY).
+  # scrape_interval 60s tambien actua como keep-alive contra el spin-down del free tier.
+  - job_name: render-eventhive
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - eventhive-user-service.onrender.com
+          - eventhive-event-service.onrender.com
+          - eventhive-ticketing-service.onrender.com
+          - eventhive-notification-service.onrender.com
+          - eventhive-credential-service.onrender.com
+          - eventhive-agenda-service.onrender.com
+          - eventhive-analytics-service.onrender.com
+          - eventhive-mobile-api-service.onrender.com
+          - eventhive-api-gateway.onrender.com
+        labels:
+          provider: render
+          stack: eventhive
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: 'eventhive-(.+?)\.onrender\.com'
+        target_label: service
+        replacement: '$1'
+
+  # Postgres en Supabase via postgres_exporter (corre como contenedor vecino).
+  - job_name: supabase-postgres
+    static_configs:
+      - targets:
+          - postgres-exporter:9187
+        labels:
+          provider: supabase
+          stack: eventhive
+
+  # Vercel: probes HTTP de uptime/latencia (no expone Prometheus nativo).
+  - job_name: vercel-frontend-blackbox
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://eventhive-frontend-pi.vercel.app/views
+          - https://eventhive-frontend-pi.vercel.app/gateway/health
+          - https://eventhive-frontend-pi.vercel.app/users/health
+        labels:
+          provider: vercel
+          stack: eventhive
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Auto-monitoreo del propio Prometheus.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

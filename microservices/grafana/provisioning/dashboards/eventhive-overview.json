@@ -1,0 +1,145 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Servicios Render activos",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(up{provider=\"render\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 6 },
+            { "color": "green", "value": 9 }
+          ]},
+          "max": 9
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value_and_name" }
+    },
+    {
+      "type": "stat",
+      "title": "Vercel uptime (probes ok)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(probe_success{provider=\"vercel\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Supabase conexiones activas",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(pg_stat_database_numbackends)", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "RPS total Render",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(http_requests_total[1m]))", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Up por servicio (Render)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "up{provider=\"render\"}", "legendFormat": "{{service}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latencia probes Vercel (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "probe_duration_seconds{provider=\"vercel\"}", "legendFormat": "{{instance}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests por servicio (rate 1m)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by (service) (rate(http_requests_total[1m]))", "legendFormat": "{{service}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latencia HTTP p95 por servicio",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}} p95", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Heap (MB) por servicio",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "nodejs_heap_size_used_bytes / 1024 / 1024", "legendFormat": "{{service}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "decmbytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Supabase: transacciones (commits + rollbacks)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(pg_stat_database_xact_commit[5m])", "legendFormat": "commits {{datname}}", "refId": "A" },
+        { "expr": "rate(pg_stat_database_xact_rollback[5m])", "legendFormat": "rollbacks {{datname}}", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["eventhive", "cloud"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "EventHive Cloud Overview",
+  "uid": "eventhive-cloud-overview",
+  "version": 1,
+  "weekStart": ""
+}
