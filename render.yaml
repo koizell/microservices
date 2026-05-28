@@ -1,3 +1,5 @@
+# Blueprint EventHive. Modificar este archivo dispara redeploy de los servicios
+# autoDeploy. Bump al final de envVarGroups o un cambio inocuo en value tambien sirve.
 envVarGroups:
   - name: eventhive-shared
     envVars:
